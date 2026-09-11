@@ -1,0 +1,14 @@
+node_modules/
+dist/
+src-tauri/target/
+*.log
+.DS_Store
+Thumbs.db
+# local-only / junk docs (excluded from open source)
+OMNIROUTE_INTEGRATION.md
+SETUP_WINDOWS.md
+TODO.md
+# local artifacts
+kestrel.zip
+.codegraph/
+.idea/

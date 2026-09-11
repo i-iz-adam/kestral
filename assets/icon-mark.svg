@@ -1,0 +1,8 @@
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Kestrel mark: three blades fanning from one point — reads as a wing
+       in flight, a fast-forward/speed motif, and a single task branching
+       into parallel sub-agents. All three readings were intentional. -->
+  <polygon points="30,78 97.5,72.5 90.5,47.5" fill="#5b8cff" fill-opacity="0.3" />
+  <polygon points="30,78 91.0,51.2 79.0,32.8" fill="#5b8cff" fill-opacity="0.62" />
+  <polygon points="30,78 79.2,27.4 64.8,16.6" fill="#8fb4ff" />
+</svg>
