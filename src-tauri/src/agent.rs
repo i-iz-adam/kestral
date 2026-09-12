@@ -46,6 +46,37 @@ struct MessageEvent<'a> {
     session_id: &'a str,
     role: &'a str,
     content: &'a str,
+    /// Ties this final message to the "start"/"delta" events for the same
+    /// assistant turn (see MessageStartEvent) so the frontend can finalize
+    /// the streaming bubble it already built rather than appending a
+    /// second, duplicate one. Absent for the user's own message, which is
+    /// never streamed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request_id: Option<&'a str>,
+}
+
+#[derive(Clone, Serialize)]
+struct MessageStartEvent<'a> {
+    session_id: &'a str,
+    request_id: &'a str,
+    role: &'a str,
+}
+
+#[derive(Clone, Serialize)]
+struct MessageDeltaEvent<'a> {
+    session_id: &'a str,
+    request_id: &'a str,
+    delta: &'a str,
+}
+
+/// Emitted instead of a final `agent://message` when an assistant turn
+/// produced no visible text at all (the common case: it went straight to
+/// tool_calls) — tells the frontend to drop the empty streaming placeholder
+/// rather than leaving an empty bubble in the timeline.
+#[derive(Clone, Serialize)]
+struct MessageCancelEvent<'a> {
+    session_id: &'a str,
+    request_id: &'a str,
 }
 
 pub(crate) const MAX_STEPS: u32 = 12;
@@ -183,7 +214,7 @@ pub async fn run_turn(
     });
     let _ = app_handle.emit_all(
         "agent://message",
-        MessageEvent { session_id: &session_id, role: "user", content: &user_message },
+        MessageEvent { session_id: &session_id, role: "user", content: &user_message, request_id: None },
     );
 
     // System prompt is built fresh each turn rather than persisted into
@@ -224,24 +255,63 @@ pub async fn run_turn(
         }];
         request_messages.extend(session.messages.clone());
 
-        let assistant_msg = omniroute::chat_completion(
+        // Each model turn gets its own id so the frontend can match the
+        // "start"/"delta" events below to the right streaming bubble, even
+        // though several turns can happen in one run_turn call (one per
+        // tool round).
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let _ = app_handle.emit_all(
+            "agent://message-start",
+            MessageStartEvent { session_id: &session_id, request_id: &request_id, role: "assistant" },
+        );
+
+        let delta_app_handle = app_handle.clone();
+        let delta_session_id = session_id.clone();
+        let delta_request_id = request_id.clone();
+        let assistant_msg = omniroute::chat_completion_stream(
             &cfg,
             MODEL,
             &request_messages,
             tools_schema.as_ref(),
+            move |delta: &str| {
+                let _ = delta_app_handle.emit_all(
+                    "agent://message-delta",
+                    MessageDeltaEvent {
+                        session_id: &delta_session_id,
+                        request_id: &delta_request_id,
+                        delta,
+                    },
+                );
+            },
         )
         .await?;
 
         session.messages.push(assistant_msg.clone());
 
         let tool_calls = assistant_msg.tool_calls.clone().unwrap_or_default();
+        let text = assistant_msg.content.clone().unwrap_or_default();
 
-        if tool_calls.is_empty() {
-            let text = assistant_msg.content.clone().unwrap_or_default();
+        if text.is_empty() {
+            // Nothing to show for this turn (it went straight to tools, or
+            // this was a genuinely empty final answer) — drop the
+            // placeholder instead of finalizing an empty bubble.
+            let _ = app_handle.emit_all(
+                "agent://message-cancel",
+                MessageCancelEvent { session_id: &session_id, request_id: &request_id },
+            );
+        } else {
             let _ = app_handle.emit_all(
                 "agent://message",
-                MessageEvent { session_id: &session_id, role: "assistant", content: &text },
+                MessageEvent {
+                    session_id: &session_id,
+                    role: "assistant",
+                    content: &text,
+                    request_id: Some(&request_id),
+                },
             );
+        }
+
+        if tool_calls.is_empty() {
             sessions::save(&app_handle, &session);
             return Ok(());
         }
