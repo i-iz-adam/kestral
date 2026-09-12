@@ -15,12 +15,16 @@ use crate::subagent;
 use crate::tools;
 
 /// Tool calls waiting on user approval (planning mode), keyed by the
-/// model's tool_call id. A pending call blocks its turn's loop on the
-/// receiving end of a oneshot channel; `approve_tool_call` resolves it.
-/// Shared globally (not per-session) since call ids are unique regardless
-/// of whether they came from the top-level loop or a sub-agent's loop.
+/// model's tool_call id, each holding the session it belongs to alongside
+/// the oneshot sender so a whole session's queue can be drained at once
+/// (see approve_all_pending) — e.g. when planning mode gets turned off
+/// mid-turn and shouldn't leave whatever's already stuck waiting behind.
+/// A pending call blocks its turn's loop on the receiving end of the
+/// channel; `resolve_approval`/`approve_all_pending` resolve it. Shared
+/// globally (not per-session) since call ids are unique regardless of
+/// whether they came from the top-level loop or a sub-agent's loop.
 #[derive(Default)]
-pub struct PendingApprovals(pub Mutex<HashMap<String, oneshot::Sender<bool>>>);
+pub struct PendingApprovals(pub Mutex<HashMap<String, (String, oneshot::Sender<bool>)>>);
 
 #[derive(Clone, Serialize)]
 pub(crate) struct ToolEvent<'a> {
@@ -151,9 +155,19 @@ pub(crate) async fn handle_tool_call(
         Some(args.clone()), None, parent_call_id,
     );
 
-    if session.planning_enabled && is_mutating(&call.function.name) {
+    // Re-read planning_enabled fresh rather than trusting the `session`
+    // snapshot this whole turn started with — a session-level toggle (the
+    // planning pill, or the /auto slash command) issued while a turn is
+    // mid-flight should take effect on the very next tool call in that
+    // same turn, not only on the next message. Falls back to the
+    // in-memory value if the reload fails for some reason.
+    let planning_enabled = sessions::load(app_handle, session_id)
+        .map(|s| s.planning_enabled)
+        .unwrap_or(session.planning_enabled);
+
+    if planning_enabled && is_mutating(&call.function.name) {
         let (tx, rx) = oneshot::channel::<bool>();
-        approvals.0.lock().unwrap().insert(call.id.clone(), tx);
+        approvals.0.lock().unwrap().insert(call.id.clone(), (session_id.to_string(), tx));
 
         emit_tool_event(
             app_handle, session_id, &call.id, &call.function.name, "awaiting-approval",
@@ -336,7 +350,27 @@ pub async fn run_turn(
 }
 
 pub fn resolve_approval(approvals: &PendingApprovals, call_id: &str, approved: bool) {
-    if let Some(tx) = approvals.0.lock().unwrap().remove(call_id) {
+    if let Some((_, tx)) = approvals.0.lock().unwrap().remove(call_id) {
         let _ = tx.send(approved);
     }
+}
+
+/// Resolves every call currently waiting on approval for one session in
+/// one shot — what the "/auto" slash command and the planning-mode pill's
+/// off-switch use, so disabling planning mode also clears whatever's
+/// already stuck waiting instead of leaving it for a separate manual
+/// approve click. Returns how many calls were resolved.
+pub fn approve_all_pending(approvals: &PendingApprovals, session_id: &str, approved: bool) -> usize {
+    let mut map = approvals.0.lock().unwrap();
+    let ids: Vec<String> = map
+        .iter()
+        .filter(|(_, (sid, _))| sid == session_id)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &ids {
+        if let Some((_, tx)) = map.remove(id) {
+            let _ = tx.send(approved);
+        }
+    }
+    ids.len()
 }

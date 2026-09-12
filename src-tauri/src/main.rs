@@ -120,6 +120,24 @@ fn set_session_subagents(
 }
 
 #[tauri::command]
+fn set_session_planning(
+    app_handle: tauri::AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    sessions::set_planning_enabled(&app_handle, &id, enabled)
+}
+
+#[tauri::command]
+fn approve_all_pending(
+    approvals: tauri::State<'_, agent::PendingApprovals>,
+    session_id: String,
+    approved: bool,
+) -> usize {
+    agent::approve_all_pending(&approvals, &session_id, approved)
+}
+
+#[tauri::command]
 fn list_sessions(app_handle: tauri::AppHandle) -> Vec<sessions::Session> {
     sessions::list(&app_handle)
 }
@@ -297,6 +315,8 @@ fn main() {
             delete_session,
             set_session_repo,
             set_session_subagents,
+            set_session_planning,
+            approve_all_pending,
             send_message,
             approve_tool_call,
             save_github_token,

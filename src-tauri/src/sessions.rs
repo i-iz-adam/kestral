@@ -86,6 +86,13 @@ pub fn set_subagents_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: b
     Ok(())
 }
 
+pub fn set_planning_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+    let mut session = load(app_handle, id).ok_or("Session not found")?;
+    session.planning_enabled = enabled;
+    save(app_handle, &session);
+    Ok(())
+}
+
 pub fn save(app_handle: &tauri::AppHandle, session: &Session) {
     let path = sessions_dir(app_handle).join(format!("{}.json", session.id));
     if let Ok(data) = serde_json::to_string_pretty(session) {
