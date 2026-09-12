@@ -23,7 +23,7 @@ pub fn tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "delegate_to_subagent",
-                "description": "Delegate a bounded, self-contained task to a fresh sub-agent with its own context window. You get back only its final summary — not its full working transcript — which is exactly the point: use this to keep your own context focused on decisions rather than filled with intermediate file contents and command output you don't need verbatim. The sub-agent starts with no conversation history, only the task text you give it, so make that task self-contained.",
+                "description": "Delegate a bounded task to a fresh sub-agent with its own context window — including making edits, running commands, or committing, not just reading and reporting back. You get only its final summary, not its full working transcript, which is the point: this is the default way substantial work gets done in this session, keeping your own context focused on decisions rather than filled with intermediate file contents and command output you don't need verbatim. The sub-agent starts with no conversation history, only the task text you give it, so make that task self-contained — include exact file paths, conventions, or context it would otherwise have to rediscover.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -60,12 +60,29 @@ pub(crate) async fn run(
             content: Some(prompts::SUBAGENT_SYSTEM_PROMPT.to_string()),
             ..Default::default()
         },
-        ChatMessage {
-            role: "user".into(),
-            content: Some(task.to_string()),
-            ..Default::default()
-        },
     ];
+
+    // Same auto-loading the top-level turn does (see agent.rs::run_turn_inner)
+    // keyed off the sub-agent's own task text, since that's this loop's
+    // equivalent of a user message — a sub-agent asked to "add tests for
+    // the parser" should get the testing skill without needing to
+    // remember list_skills/read_skill exist any more than the parent does.
+    for skill in skills::find_relevant(app_handle, task) {
+        if let Some(content) = skills::get_content(app_handle, &skill.id) {
+            agent::emit_skill_loaded(app_handle, &session.id, &skill);
+            messages.push(ChatMessage {
+                role: "system".into(),
+                content: Some(format!("Relevant skill — {}:\n\n{}", skill.name, content)),
+                ..Default::default()
+            });
+        }
+    }
+
+    messages.push(ChatMessage {
+        role: "user".into(),
+        content: Some(task.to_string()),
+        ..Default::default()
+    });
 
     // Same tool surface as the parent, minus delegate_to_subagent itself —
     // sub-agents don't spawn further sub-agents. One level of nesting only.

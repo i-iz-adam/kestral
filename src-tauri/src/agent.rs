@@ -83,6 +83,20 @@ struct MessageCancelEvent<'a> {
     request_id: &'a str,
 }
 
+/// Emitted exactly once, no matter which path a turn exits through
+/// (finished normally, hit an error, hit the step limit) — the frontend's
+/// single source of truth for "this turn is over," used to know when it's
+/// safe to stop treating a session as live and fall back entirely to its
+/// persisted history. Session-scoped rather than tied to any particular
+/// view being open, since the turn itself runs independently of whether
+/// anyone is looking at it (see run_turn's wrapper below).
+#[derive(Clone, Serialize)]
+struct TurnEndEvent<'a> {
+    session_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a str>,
+}
+
 pub(crate) const MAX_STEPS: u32 = 12;
 pub(crate) const MODEL: &str = "auto/coding";
 
@@ -103,6 +117,22 @@ pub(crate) fn emit_tool_event(
     let _ = app_handle.emit_all(
         "agent://tool-call",
         ToolEvent { session_id, call_id, name, status, args, result, parent_call_id },
+    );
+}
+
+/// Announces an auto-loaded skill through the same event channel as a
+/// real tool call (name "__skill_loaded__", always "done" — nothing was
+/// actually invoked, so there's no start/approval phase) rather than a
+/// bespoke event type. The frontend already renders arbitrary tool calls
+/// generically, so this gets ordering, grouping, and a place in the
+/// timeline for free — it just special-cases this one name into its own
+/// animated card instead of a plain tool row (see SkillLoadedCard.tsx).
+pub(crate) fn emit_skill_loaded(app_handle: &tauri::AppHandle, session_id: &str, skill: &skills::Skill) {
+    let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
+    let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
+    emit_tool_event(
+        app_handle, session_id, &call_id, "__skill_loaded__", "done",
+        Some(args), Some(skill.description.clone()), None,
     );
 }
 
@@ -209,17 +239,40 @@ pub(crate) async fn handle_tool_call(
     }
 }
 
+/// Thin wrapper: the actual work happens in run_turn_inner, but no matter
+/// which of its several exit points is taken — success, an early `?`
+/// failure, or the step-limit error — this makes sure `agent://turn-end`
+/// still fires exactly once. Tauri already runs this on its async runtime
+/// independent of any particular webview page, so the turn itself was
+/// never actually tied to a view being open; what was missing was a
+/// reliable signal for the frontend to know it finished, since navigating
+/// away and back used to mean local state (and its event listeners) got
+/// torn down and rebuilt, silently dropping whatever happened in between.
 pub async fn run_turn(
     app_handle: tauri::AppHandle,
     approvals: tauri::State<'_, PendingApprovals>,
     session_id: String,
     user_message: String,
 ) -> Result<(), String> {
-    let cfg = config::load_omniroute_config(&app_handle)
+    let result = run_turn_inner(&app_handle, approvals, &session_id, user_message).await;
+    let _ = app_handle.emit_all(
+        "agent://turn-end",
+        TurnEndEvent { session_id: &session_id, error: result.as_ref().err().map(String::as_str) },
+    );
+    result
+}
+
+async fn run_turn_inner(
+    app_handle: &tauri::AppHandle,
+    approvals: tauri::State<'_, PendingApprovals>,
+    session_id: &str,
+    user_message: String,
+) -> Result<(), String> {
+    let cfg = config::load_omniroute_config(app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
 
     let mut session =
-        sessions::load(&app_handle, &session_id).ok_or("Session not found")?;
+        sessions::load(app_handle, session_id).ok_or("Session not found")?;
 
     session.messages.push(ChatMessage {
         role: "user".into(),
@@ -228,7 +281,7 @@ pub async fn run_turn(
     });
     let _ = app_handle.emit_all(
         "agent://message",
-        MessageEvent { session_id: &session_id, role: "user", content: &user_message, request_id: None },
+        MessageEvent { session_id, role: "user", content: &user_message, request_id: None },
     );
 
     // System prompt is built fresh each turn rather than persisted into
@@ -252,14 +305,42 @@ pub async fn run_turn(
             .cloned()
             .unwrap_or_default();
         all.extend(skills::tool_definitions().as_array().cloned().unwrap_or_default());
-        if github::load_token(&app_handle).is_some() {
+        if github::load_token(app_handle).is_some() {
             all.extend(github::tool_definitions().as_array().cloned().unwrap_or_default());
         }
         if session.subagents_enabled {
             all.extend(subagent::tool_definitions().as_array().cloned().unwrap_or_default());
         }
+        // Best-effort: if a hosted web-search tool type is configured for
+        // OmniRoute (see config::OmniRouteConfig::web_search_tool), pass it
+        // through alongside our own function tools. Whether/how OmniRoute
+        // actually executes this is outside this app's code — it's a
+        // pass-through, not something handled in tools.rs.
+        if let Some(search_tool) = cfg.web_search_tool.as_ref().filter(|s| !s.is_empty()) {
+            all.push(serde_json::json!({ "type": search_tool }));
+        }
         Some(Value::Array(all))
     };
+
+    // Auto-load whatever skills this message's content suggests are
+    // relevant, rather than leaving it entirely up to the model to
+    // remember list_skills/read_skill exist and choose to call them.
+    // Announced once per turn (not per tool-call round) and injected as
+    // extra system context on every step of this turn, so the guidance
+    // stays present through however many tool rounds the turn takes.
+    let mut skill_messages: Vec<ChatMessage> = Vec::new();
+    if session.mode != "general" {
+        for skill in skills::find_relevant(app_handle, &user_message) {
+            if let Some(content) = skills::get_content(app_handle, &skill.id) {
+                emit_skill_loaded(app_handle, session_id, &skill);
+                skill_messages.push(ChatMessage {
+                    role: "system".into(),
+                    content: Some(format!("Relevant skill — {}:\n\n{}", skill.name, content)),
+                    ..Default::default()
+                });
+            }
+        }
+    }
 
     for _ in 0..MAX_STEPS {
         let mut request_messages = vec![ChatMessage {
@@ -267,6 +348,7 @@ pub async fn run_turn(
             content: Some(system_prompt.clone()),
             ..Default::default()
         }];
+        request_messages.extend(skill_messages.clone());
         request_messages.extend(session.messages.clone());
 
         // Each model turn gets its own id so the frontend can match the
@@ -276,11 +358,11 @@ pub async fn run_turn(
         let request_id = uuid::Uuid::new_v4().to_string();
         let _ = app_handle.emit_all(
             "agent://message-start",
-            MessageStartEvent { session_id: &session_id, request_id: &request_id, role: "assistant" },
+            MessageStartEvent { session_id, request_id: &request_id, role: "assistant" },
         );
 
         let delta_app_handle = app_handle.clone();
-        let delta_session_id = session_id.clone();
+        let delta_session_id = session_id.to_string();
         let delta_request_id = request_id.clone();
         let assistant_msg = omniroute::chat_completion_stream(
             &cfg,
@@ -311,13 +393,13 @@ pub async fn run_turn(
             // placeholder instead of finalizing an empty bubble.
             let _ = app_handle.emit_all(
                 "agent://message-cancel",
-                MessageCancelEvent { session_id: &session_id, request_id: &request_id },
+                MessageCancelEvent { session_id, request_id: &request_id },
             );
         } else {
             let _ = app_handle.emit_all(
                 "agent://message",
                 MessageEvent {
-                    session_id: &session_id,
+                    session_id,
                     role: "assistant",
                     content: &text,
                     request_id: Some(&request_id),
@@ -326,16 +408,16 @@ pub async fn run_turn(
         }
 
         if tool_calls.is_empty() {
-            sessions::save(&app_handle, &session);
+            sessions::save(app_handle, &session);
             return Ok(());
         }
 
         for call in &tool_calls {
             let tool_msg = handle_tool_call(
-                &app_handle,
+                app_handle,
                 approvals.inner(),
                 &session,
-                &session_id,
+                session_id,
                 call,
                 None,
             )
@@ -343,7 +425,7 @@ pub async fn run_turn(
             session.messages.push(tool_msg);
         }
 
-        sessions::save(&app_handle, &session);
+        sessions::save(app_handle, &session);
     }
 
     Err("Hit the step limit for this turn (12 tool rounds) without a final answer".into())

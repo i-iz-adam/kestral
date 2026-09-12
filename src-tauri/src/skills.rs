@@ -301,3 +301,62 @@ pub fn maybe_execute(
         _ => None,
     }
 }
+
+/// Hand-picked trigger words per builtin skill, checked against the
+/// user's message so the right skill can be pulled into context
+/// automatically (see find_relevant) instead of relying on the model to
+/// remember list_skills/read_skill exist and choose to call them — which,
+/// being entirely optional from the model's point of view, it often just
+/// doesn't. Bare single words are matched as whole tokens (so "go" the
+/// builtin skill doesn't fire on every sentence containing the word "go");
+/// anything containing a space or a dot is matched as a substring instead.
+fn skill_keywords(id: &str) -> &'static [&'static str] {
+    match id {
+        "git-workflow" => &["git", "commit", "commits", "branch", "rebase", "merge", "pull request", "pr"],
+        "debugging" => &["bug", "debug", "debugging", "crash", "crashing", "traceback", "stack trace", "broken", "failing"],
+        "testing" => &["test", "tests", "testing", "pytest", "jest", "unit test", "coverage", "tdd"],
+        "code-review" => &["review", "code review", "self-review"],
+        "refactoring" => &["refactor", "refactoring", "restructure", "restructuring"],
+        "lang-python" => &["python", "pip", "django", "flask", "pytest", ".py"],
+        "lang-typescript" => &["typescript", "javascript", "react", "vite", "npm", "node", "tsx", ".ts", ".tsx", ".js", ".jsx"],
+        "lang-rust" => &["rust", "cargo", "tokio", ".rs"],
+        "lang-go" => &["golang", "goroutine", "go.mod", ".go"],
+        _ => &[],
+    }
+}
+
+/// Scans `text` (a user message) for skill triggers and returns whichever
+/// enabled builtin skills matched, ready to be dropped straight into a
+/// turn's context. Only covers builtins — installed skills have no
+/// hand-written keyword list, so they still rely on the model finding
+/// them via list_skills/read_skill, same as before.
+pub fn find_relevant(app_handle: &tauri::AppHandle, text: &str) -> Vec<Skill> {
+    let lower = text.to_lowercase();
+    let tokens: std::collections::HashSet<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let enabled = list(app_handle);
+
+    builtin_skills()
+        .into_iter()
+        .filter(|b| {
+            enabled.iter().any(|s| s.id == b.id && s.enabled)
+                && skill_keywords(b.id).iter().any(|kw| {
+                    if kw.contains(' ') || kw.contains('.') {
+                        lower.contains(kw)
+                    } else {
+                        tokens.contains(kw)
+                    }
+                })
+        })
+        .map(|b| Skill {
+            id: b.id.to_string(),
+            name: b.name.to_string(),
+            description: b.description.to_string(),
+            source: "builtin".to_string(),
+            enabled: true,
+        })
+        .collect()
+}
