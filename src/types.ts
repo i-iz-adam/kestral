@@ -38,7 +38,52 @@ export interface MessageEventPayload {
   session_id: string;
   role: string;
   content: string;
+  /** Ties this final message to the start/delta events for the same
+   * streamed turn. Absent for the user's own (never-streamed) message. */
+  request_id?: string | null;
 }
+
+export interface MessageStartEventPayload {
+  session_id: string;
+  request_id: string;
+  role: string;
+}
+
+export interface MessageDeltaEventPayload {
+  session_id: string;
+  request_id: string;
+  delta: string;
+}
+
+export interface MessageCancelEventPayload {
+  session_id: string;
+  request_id: string;
+}
+
+/** One entry in the session's chronological view — a chat bubble or a
+ * top-level tool call — kept in a single array so render order always
+ * matches the order these actually happened in, instead of grouping all
+ * messages before all tool calls regardless of when each occurred. */
+export type TimelineItem =
+  | {
+      kind: "message";
+      key: string;
+      requestId?: string;
+      role: string;
+      content: string;
+      streaming: boolean;
+    }
+  | { kind: "tool"; key: string; callId: string };
+
+/** One entry in a session's *persisted* history, reconstructed from its
+ * saved ChatMessage[] on load — a chat bubble or a top-level tool call.
+ * Unlike TimelineItem (which looks tool state up from a live `liveCalls`
+ * map so in-place status updates are cheap), a HistoryItem carries its
+ * ToolCallEventPayload directly, since persisted calls are already
+ * finished and never change again. */
+export type HistoryItem =
+  | { kind: "message"; key: string; role: string; content: string }
+  | { kind: "tool"; key: string; call: ToolCallEventPayload };
 
 export interface OmniRouteConfigPayload {
   mode: "local" | "remote";

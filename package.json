@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.3",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.12",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
