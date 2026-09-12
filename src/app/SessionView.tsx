@@ -1,181 +1,70 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
-import { listen } from "@tauri-apps/api/event";
-import type {
-  Session,
-  ToolCallEventPayload,
-  MessageEventPayload,
-  MessageStartEventPayload,
-  MessageDeltaEventPayload,
-  MessageCancelEventPayload,
-  TimelineItem,
-  HistoryItem,
-} from "../types";
+import type { HistoryItem, ToolCallEventPayload, TimelineItem } from "../types";
 import GithubToolCard from "./GithubToolCard";
 import ToolCallRow from "./ToolCallRow";
 import SubagentCard from "./SubagentCard";
+import DiffToolCard from "./DiffToolCard";
 import MessageContent from "./MessageContent";
 import { buildHistoryTimeline } from "./historyTimeline";
-import { looksLikeSlashCommand, parseSlashCommand, SLASH_HELP } from "./slashCommands";
-
-let timelineKeySeq = 0;
-const nextKey = (prefix: string) => `${prefix}-${++timelineKeySeq}`;
+import { looksLikeSlashCommand, parseSlashCommand, filterSlashCommands, SLASH_HELP, type SlashCommandDef } from "./slashCommands";
+import SlashCommandMenu from "./SlashCommandMenu";
+import SkillLoadedCard from "./SkillLoadedCard";
+import {
+  ensureAgentEventsStarted,
+  loadSession,
+  markSendingStart,
+  mutateSessionLocally,
+  pushSystemNote as storePushSystemNote,
+} from "./agentStore";
+import { useAgentSession } from "./useAgentSession";
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
-  const [session, setSession] = useState<Session | null>(null);
+  // Live turn state (timeline/liveCalls/sending) and the persisted session
+  // record both come from a global store that keeps running regardless of
+  // whether this component is mounted — see agentStore.ts. Switching to
+  // another session and back (or opening Providers/Settings, which used
+  // to unmount this entirely) no longer loses a turn in progress.
+  const { session, timeline, liveCalls, sending } = useAgentSession(sessionId);
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  // Every live tool call by id, regardless of nesting — the source of
-  // truth for each call's current status/result. Render order for
-  // top-level calls comes from `timeline` instead, so this can be a plain
-  // lookup map in spirit (kept as an array for the existing nested-lookup
-  // code in child cards).
-  const [liveCalls, setLiveCalls] = useState<ToolCallEventPayload[]>([]);
-  // The single chronological feed of messages + top-level tool calls, in
-  // the exact order the backend emitted them — this is what actually
-  // fixes ordering: a bubble and a tool row are just two kinds of entry in
-  // one list instead of two lists rendered one after the other.
-  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [editingRepo, setEditingRepo] = useState(false);
   const [repoInput, setRepoInput] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    setLiveCalls([]);
-    setTimeline([]);
-    setSending(false);
-    invoke<Session>("get_session", { id: sessionId }).then((s) => {
-      setSession(s);
-      setRepoInput(s.linked_repo ?? "");
-    });
+    ensureAgentEventsStarted();
+    loadSession(sessionId);
   }, [sessionId]);
 
   useEffect(() => {
-    const unlistenTool = listen<ToolCallEventPayload>(
-      "agent://tool-call",
-      (evt) => {
-        if (evt.payload.session_id !== sessionId) return;
-        setLiveCalls((prev) => {
-          const idx = prev.findIndex((c) => c.call_id === evt.payload.call_id);
-          if (idx === -1) return [...prev, evt.payload];
-          const copy = [...prev];
-          copy[idx] = evt.payload;
-          return copy;
-        });
-        if (!evt.payload.parent_call_id) {
-          setTimeline((prev) =>
-            prev.some(
-              (item) => item.kind === "tool" && item.callId === evt.payload.call_id
-            )
-              ? prev
-              : [
-                  ...prev,
-                  { kind: "tool", key: nextKey("tool"), callId: evt.payload.call_id },
-                ]
-          );
-        }
-      }
-    );
-
-    // A turn's assistant text arrives as: message-start (placeholder),
-    // any number of message-delta chunks, then either a final message
-    // (finalize) or a message-cancel (nothing was said, it went straight
-    // to tool calls) — see agent.rs::run_turn.
-    const unlistenStart = listen<MessageStartEventPayload>(
-      "agent://message-start",
-      (evt) => {
-        if (evt.payload.session_id !== sessionId) return;
-        setTimeline((prev) => [
-          ...prev,
-          {
-            kind: "message",
-            key: nextKey("msg"),
-            requestId: evt.payload.request_id,
-            role: evt.payload.role,
-            content: "",
-            streaming: true,
-          },
-        ]);
-      }
-    );
-    const unlistenDelta = listen<MessageDeltaEventPayload>(
-      "agent://message-delta",
-      (evt) => {
-        if (evt.payload.session_id !== sessionId) return;
-        setTimeline((prev) => {
-          const idx = prev.findIndex(
-            (item) => item.kind === "message" && item.requestId === evt.payload.request_id
-          );
-          if (idx === -1) return prev;
-          const copy = [...prev];
-          const item = copy[idx] as Extract<TimelineItem, { kind: "message" }>;
-          copy[idx] = { ...item, content: item.content + evt.payload.delta };
-          return copy;
-        });
-      }
-    );
-    const unlistenCancel = listen<MessageCancelEventPayload>(
-      "agent://message-cancel",
-      (evt) => {
-        if (evt.payload.session_id !== sessionId) return;
-        setTimeline((prev) =>
-          prev.filter(
-            (item) => !(item.kind === "message" && item.requestId === evt.payload.request_id)
-          )
-        );
-      }
-    );
-    const unlistenMsg = listen<MessageEventPayload>(
-      "agent://message",
-      (evt) => {
-        if (evt.payload.session_id !== sessionId) return;
-        setTimeline((prev) => {
-          if (evt.payload.request_id) {
-            const idx = prev.findIndex(
-              (item) => item.kind === "message" && item.requestId === evt.payload.request_id
-            );
-            if (idx !== -1) {
-              const copy = [...prev];
-              copy[idx] = {
-                kind: "message",
-                key: copy[idx].key,
-                requestId: evt.payload.request_id,
-                role: evt.payload.role,
-                content: evt.payload.content,
-                streaming: false,
-              };
-              return copy;
-            }
-          }
-          // No matching placeholder (the user's own message, which is
-          // never streamed) — just append it.
-          return [
-            ...prev,
-            {
-              kind: "message",
-              key: nextKey("msg"),
-              role: evt.payload.role,
-              content: evt.payload.content,
-              streaming: false,
-            },
-          ];
-        });
-        if (evt.payload.role === "assistant") setSending(false);
-      }
-    );
-    return () => {
-      unlistenTool.then((f) => f());
-      unlistenStart.then((f) => f());
-      unlistenDelta.then((f) => f());
-      unlistenCancel.then((f) => f());
-      unlistenMsg.then((f) => f());
-    };
-  }, [sessionId]);
+    setRepoInput(session?.linked_repo ?? "");
+  }, [session?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [timeline]);
+
+  // Command menu's filtered list is recomputed from `input` on every
+  // render (cheap — a handful of string comparisons over ~4 commands);
+  // the highlighted row resets to the top whenever the match set changes
+  // so it can't point past the end of a shorter list after a keystroke.
+  const slashMatches = input.startsWith("/") ? filterSlashCommands(input) : [];
+  useEffect(() => {
+    setSlashIndex(0);
+  }, [input]);
+
+  const selectSlashCommand = (cmd: SlashCommandDef) => {
+    if (cmd.args) {
+      setInput(`/${cmd.name} `);
+      composerRef.current?.focus();
+    } else {
+      setInput("");
+      runSlashCommand(`/${cmd.name}`);
+      composerRef.current?.focus();
+    }
+  };
 
   // Reconstructed once per session load (not on every incidental local
   // state tweak, like toggling sub-agents) — this is what makes tool call
@@ -190,12 +79,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   // Local-only feedback for a slash command — never touches session.messages
   // or the model, so it doesn't cost a turn and disappears like any other
   // ephemeral UI state if you switch sessions and back.
-  const pushSystemNote = (text: string) => {
-    setTimeline((prev) => [
-      ...prev,
-      { kind: "message", key: nextKey("sys"), role: "system", content: text, streaming: false },
-    ]);
-  };
+  const pushSystemNote = (text: string) => storePushSystemNote(sessionId, text);
 
   // Shared by the "/auto"/"/plan off" slash commands and the header's
   // Planning pill — draining pending approvals here (rather than only
@@ -205,7 +89,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const turnPlanningOff = async () => {
     await invoke("set_session_planning", { id: sessionId, enabled: false });
     const resolved = await invoke<number>("approve_all_pending", { sessionId, approved: true });
-    setSession((s) => (s ? { ...s, planning_enabled: false } : s));
+    mutateSessionLocally(sessionId, (s) => ({ ...s, planning_enabled: false }));
     pushSystemNote(
       resolved > 0
         ? `Planning mode off — approved ${resolved} pending call${resolved === 1 ? "" : "s"}; new tool calls will run without asking.`
@@ -215,7 +99,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 
   const turnPlanningOn = async () => {
     await invoke("set_session_planning", { id: sessionId, enabled: true });
-    setSession((s) => (s ? { ...s, planning_enabled: true } : s));
+    mutateSessionLocally(sessionId, (s) => ({ ...s, planning_enabled: true }));
     pushSystemNote("Planning mode on — mutating tool calls will need approval again.");
   };
 
@@ -227,7 +111,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 
   const setSubagents = async (enabled: boolean, note = true) => {
     await invoke("set_session_subagents", { id: sessionId, enabled });
-    setSession((s) => (s ? { ...s, subagents_enabled: enabled } : s));
+    mutateSessionLocally(sessionId, (s) => ({ ...s, subagents_enabled: enabled }));
     if (note) pushSystemNote(`Sub-agents turned ${enabled ? "on" : "off"}.`);
   };
 
@@ -268,22 +152,13 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       return;
     }
 
-    setSending(true);
-    try {
-      await invoke("send_message", { sessionId, message: text });
-    } catch (e) {
-      setTimeline((prev) => [
-        ...prev,
-        {
-          kind: "message",
-          key: nextKey("msg"),
-          role: "assistant",
-          content: `Error: ${String(e)}`,
-          streaming: false,
-        },
-      ]);
-      setSending(false);
-    }
+    markSendingStart(sessionId);
+    // Errors surface via the global agent://turn-end listener (agentStore.ts)
+    // as a system note in this session's timeline, regardless of whether
+    // this component is still mounted when they arrive — so there's
+    // nothing left to do here on rejection except avoid an unhandled
+    // promise rejection warning.
+    invoke("send_message", { sessionId, message: text }).catch(() => {});
   };
 
   const approve = (callId: string, approved: boolean) => {
@@ -298,7 +173,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const saveRepo = async () => {
     const repo = repoInput.trim() || null;
     await invoke("set_session_repo", { id: sessionId, repo });
-    setSession((s) => (s ? { ...s, linked_repo: repo } : s));
+    mutateSessionLocally(sessionId, (s) => ({ ...s, linked_repo: repo }));
     setEditingRepo(false);
   };
 
@@ -308,6 +183,9 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   // a tool call renders the same way regardless of whether it just
   // happened or is being replayed from disk.
   const renderToolCard = (call: ToolCallEventPayload, nested: ToolCallEventPayload[]) => {
+    if (call.name === "__skill_loaded__") {
+      return <SkillLoadedCard key={call.call_id} event={call} />;
+    }
     if (call.name === "delegate_to_subagent") {
       return (
         <SubagentCard
@@ -329,6 +207,9 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           onPromptFix={promptFix}
         />
       );
+    }
+    if (call.name === "edit_file" || call.name === "apply_patch") {
+      return <DiffToolCard key={call.call_id} event={call} onApprove={approve} />;
     }
     return <ToolCallRow key={call.call_id} event={call} onApprove={approve} />;
   };
@@ -468,12 +349,36 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       </div>
 
       <div className="composer-area">
+        {session.mode === "coding" && slashMatches.length > 0 && (
+          <SlashCommandMenu
+            commands={slashMatches}
+            activeIndex={Math.min(slashIndex, slashMatches.length - 1)}
+            onSelect={selectSlashCommand}
+          />
+        )}
         <div className="composer">
           <textarea
             ref={composerRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
+              if (slashMatches.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSlashIndex((i) => (i + 1) % slashMatches.length);
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSlashIndex((i) => (i - 1 + slashMatches.length) % slashMatches.length);
+                  return;
+                }
+                if ((e.key === "Tab" || e.key === "Enter") && !e.shiftKey) {
+                  e.preventDefault();
+                  selectSlashCommand(slashMatches[Math.min(slashIndex, slashMatches.length - 1)]);
+                  return;
+                }
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 send();
@@ -489,9 +394,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
             {sending ? "Working" : "Send"}
           </button>
         </div>
-        {session.mode === "coding" && looksLikeSlashCommand(input) && (
-          <div className="composer-hint">{SLASH_HELP}</div>
-        )}
       </div>
     </div>
   );

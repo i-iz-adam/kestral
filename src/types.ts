@@ -60,6 +60,11 @@ export interface MessageCancelEventPayload {
   request_id: string;
 }
 
+export interface TurnEndEventPayload {
+  session_id: string;
+  error?: string | null;
+}
+
 /** One entry in the session's chronological view — a chat bubble or a
  * top-level tool call — kept in a single array so render order always
  * matches the order these actually happened in, instead of grouping all
@@ -89,6 +94,7 @@ export interface OmniRouteConfigPayload {
   mode: "local" | "remote";
   remote_url: string | null;
   api_key: string | null;
+  web_search_tool?: string | null;
 }
 
 export interface Skill {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import type { Session } from "../types";
 import EngineStatusBadge from "./EngineStatusBadge";
+import { useAgentSession } from "./useAgentSession";
 
 type Mode = "coding" | "general";
 
@@ -111,16 +112,12 @@ export default function Sidebar({
 
       <div className="session-list">
         {sessions.map((s) => (
-          <button
+          <SessionListItem
             key={s.id}
-            className={
-              "session-item" + (s.id === activeSessionId ? " active" : "")
-            }
-            onClick={() => onSelectSession(s.id)}
-          >
-            <span className="session-title">{s.title}</span>
-            <span className="session-mode">{s.mode}</span>
-          </button>
+            session={s}
+            active={s.id === activeSessionId}
+            onSelect={() => onSelectSession(s.id)}
+          />
         ))}
         {sessions.length === 0 && (
           <p className="hint small">No sessions yet.</p>
@@ -143,5 +140,33 @@ export default function Sidebar({
         </div>
       </div>
     </div>
+  );
+}
+
+/** A session's own row subscribes to the global agent store directly, so
+ * "this session is working right now" stays visible in the list even
+ * while you're looking at a different one — the whole point of turns now
+ * running independently of whichever view happens to be open. */
+function SessionListItem({
+  session,
+  active,
+  onSelect,
+}: {
+  session: Session;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const { sending } = useAgentSession(session.id);
+  return (
+    <button
+      className={"session-item" + (active ? " active" : "")}
+      onClick={onSelect}
+    >
+      <span className="session-title">{session.title}</span>
+      <span className="session-item-right">
+        {sending && <span className="session-working-dot" title="Working..." />}
+        <span className="session-mode">{session.mode}</span>
+      </span>
+    </button>
   );
 }
