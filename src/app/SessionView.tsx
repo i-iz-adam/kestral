@@ -297,6 +297,11 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   return (
     <div className="session-view">
       <div className="session-header">
+        <span
+          className={"life-orb" + (sending ? " active" : "")}
+          aria-hidden="true"
+          title={sending ? "The agent is working" : "Idle"}
+        />
         <h2>{session.title}</h2>
         <span className="hint">{session.mode}</span>
         <div className="repo-link">

@@ -1,16 +1,29 @@
 :root {
   color-scheme: dark;
-  --bg: #0b0c10;
-  --surface: #14161c;
-  --surface-2: #1c1f27;
-  --border: #2a2e38;
-  --text: #e6e8ec;
-  --text-dim: #9aa0ab;
-  --accent: #5b8cff;
-  --accent-dim: rgba(91, 140, 255, 0.15);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.28);
+  /* Enchanted-grimoire palette: near-black with warm undertones, an
+     arcane-violet "mana" accent for normal active state, and a gold
+     "ember" accent reserved for completion/success flourishes. Kept as
+     two distinct hues (rather than one flat accent) so a glow always
+     tells you *what kind* of alive it is — working vs. just finished. */
+  --bg: #0a0810;
+  --surface: #15111f;
+  --surface-2: #1d1830;
+  --border: #322a48;
+  --border-soft: rgba(155, 120, 255, 0.18);
+  --text: #ece7f5;
+  --text-dim: #a89bc0;
+  --accent: #9b6bff;
+  --accent-soft: #b794ff;
+  --accent-dim: rgba(155, 107, 255, 0.15);
+  --accent-glow: rgba(155, 107, 255, 0.55);
+  --gold: #e0b45c;
+  --gold-dim: rgba(224, 180, 92, 0.15);
+  --gold-glow: rgba(224, 180, 92, 0.6);
+  --danger: #f2665a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.5);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-breathe: cubic-bezier(0.45, 0.05, 0.55, 0.95);
   font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
 }
 
@@ -22,9 +35,12 @@ html, body, #root {
   height: 100%;
   margin: 0;
   background:
-    radial-gradient(1200px 600px at 15% -10%, rgba(91, 140, 255, 0.08), transparent 60%),
+    radial-gradient(1100px 560px at 12% -8%, rgba(155, 107, 255, 0.1), transparent 62%),
+    radial-gradient(900px 500px at 88% 108%, rgba(224, 180, 92, 0.06), transparent 60%),
     var(--bg);
   color: var(--text);
+  position: relative;
+  overflow: hidden;
 }
 
 /* A calm set of defaults so interactive elements feel considered rather
@@ -32,12 +48,58 @@ html, body, #root {
    of this, but anything that forgets to still gets a decent transition. */
 button, input, textarea {
   transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease),
-    color 0.15s var(--ease), opacity 0.15s var(--ease), transform 0.1s var(--ease);
+    color 0.15s var(--ease), opacity 0.15s var(--ease), transform 0.1s var(--ease),
+    box-shadow 0.2s var(--ease);
 }
 
 button:active:not(:disabled) {
   transform: scale(0.97);
 }
+
+/* "Charge" hover — a soft glow gathers before the click lands, like the
+   control is warming up rather than just flipping a hover state. Applied
+   broadly to real buttons; decorative/icon-only ones opt out per-selector
+   where a tighter glow looks better. */
+button:not(:disabled):hover {
+  box-shadow: 0 0 0 1px var(--border-soft), 0 0 16px -4px var(--accent-glow);
+}
+
+/* Ambient drifting motes rendered behind the whole app (see
+   AmbientMotes.tsx) — fixed, non-interactive, sits under everything. */
+.ambient-motes {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.mote {
+  position: absolute;
+  bottom: -6px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--gold) 0%, rgba(224, 180, 92, 0) 72%);
+  opacity: 0;
+  filter: blur(0.3px);
+  animation-name: mote-drift;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.mote.violet {
+  background: radial-gradient(circle, var(--accent-soft) 0%, rgba(155, 107, 255, 0) 72%);
+}
+
+@keyframes mote-drift {
+  0% { transform: translate(0, 0) scale(0.8); opacity: 0; }
+  12% { opacity: 0.7; }
+  50% { transform: translate(10px, -46vh) scale(1); opacity: 0.85; }
+  88% { opacity: 0; }
+  100% { transform: translate(-8px, -92vh) scale(0.8); opacity: 0; }
+}
+
 
 ::-webkit-scrollbar {
   width: 10px;
@@ -142,7 +204,7 @@ button:active:not(:disabled) {
 .step-card button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0b0c10;
+  color: var(--bg);
   font-weight: 500;
   margin-top: 1.25rem;
   width: 100%;
@@ -213,7 +275,7 @@ button:active:not(:disabled) {
 }
 
 .fail {
-  color: #f87171;
+  color: var(--danger);
   font-size: 13px;
 }
 
@@ -226,6 +288,8 @@ button:active:not(:disabled) {
 .shell {
   display: flex;
   height: 100%;
+  position: relative;
+  z-index: 1;
 }
 
 .shell-content {
@@ -233,6 +297,24 @@ button:active:not(:disabled) {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
+}
+
+/* Page-turn: switching sessions or panels settles in like a page turning
+   in a book, rather than an instant swap. Blur is tiny and brief enough
+   not to feel laggy, just enough to read as "materializing". */
+@keyframes page-turn-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); filter: blur(3px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+.view-transition {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: page-turn-in 0.34s var(--ease) both;
 }
 
 .empty-state {
@@ -278,7 +360,8 @@ button:active:not(:disabled) {
 
 .mode-toggle button.active {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--border-soft), 0 0 10px -3px var(--accent-glow);
 }
 
 .checkbox-row {
@@ -289,18 +372,24 @@ button:active:not(:disabled) {
   color: var(--text-dim);
 }
 
+.checkbox-row input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
 .sidebar > button.primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), #7a4fe0);
   border: none;
-  color: #0b0c10;
+  color: #fff;
   font-weight: 500;
   padding: 10px;
   border-radius: 8px;
   cursor: pointer;
+  box-shadow: 0 0 0 1px var(--border-soft), var(--shadow-sm);
 }
 
-.sidebar > button.primary:hover {
-  filter: brightness(1.08);
+.sidebar > button.primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: 0 0 0 1px var(--border-soft), 0 0 20px -4px var(--accent-glow), var(--shadow-sm);
 }
 
 .session-list {
@@ -317,13 +406,31 @@ button:active:not(:disabled) {
   align-items: center;
   background: transparent;
   border: none;
+  border-left: 2px solid transparent;
   color: var(--text);
   text-align: left;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 8px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
-  transition: background-color 0.15s var(--ease), transform 0.15s var(--ease);
+  transition: background-color 0.15s var(--ease), transform 0.15s var(--ease),
+    border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+/* A faint colored spine identifies the session's mode at a glance —
+   coding sessions in violet, general chats in gold — like a bookmark
+   ribbon peeking out of a shelved tome. */
+.session-item {
+  border-left-color: rgba(155, 107, 255, 0.35);
+}
+
+.session-item.mode-general {
+  border-left-color: rgba(224, 180, 92, 0.35);
+}
+
+.session-item.mode-general.active {
+  border-left-color: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--border), -1px 0 10px -3px var(--gold-glow);
 }
 
 .session-item:hover {
@@ -333,7 +440,8 @@ button:active:not(:disabled) {
 
 .session-item.active {
   background: var(--surface-2);
-  border: 1px solid var(--border);
+  border-left-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--border), -1px 0 10px -3px var(--accent-glow);
 }
 
 .session-title {
@@ -366,33 +474,47 @@ button:active:not(:disabled) {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--gold);
+  box-shadow: 0 0 6px 1px var(--gold-glow);
   margin-left: 8px;
   animation: session-working-pulse 1.1s ease-in-out infinite;
 }
 
+/* Footer icon rail — Providers/Skills/GitHub/Settings/About used to be
+   five full-width text buttons stacked three rows deep; now a single
+   compact row of icons with the label as a tooltip + tiny caption, so
+   the destinations stay just as discoverable without dominating the
+   bottom of the sidebar. */
 .sidebar-nav {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   border-top: 1px solid var(--border);
   padding-top: 10px;
 }
 
-.sidebar-footer-row {
-  display: flex;
-  gap: 8px;
-}
-
-.sidebar-footer-row button {
+.icon-rail-btn {
   flex: 1;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  padding: 7px 2px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 13px;
+}
+
+.icon-rail-btn:hover {
+  color: var(--accent-soft);
+  border-color: var(--border-soft);
+  background: var(--surface-2);
+}
+
+.icon-rail-caption {
+  font-size: 9px;
+  letter-spacing: 0.02em;
 }
 
 /* ---- session view ---- */
@@ -409,6 +531,35 @@ button:active:not(:disabled) {
   display: flex;
   align-items: baseline;
   gap: 10px;
+}
+
+/* The life-orb: a small ember that breathes slowly like candlelight when
+   idle, and brightens into a faster, tighter pulse while the agent is
+   actively working — a single glance answers "is anything happening"
+   without reading any of the badges next to it. */
+@keyframes orb-breathe-idle {
+  0%, 100% { box-shadow: 0 0 4px 1px var(--accent-glow); opacity: 0.55; transform: scale(0.92); }
+  50% { box-shadow: 0 0 9px 2px var(--accent-glow); opacity: 0.9; transform: scale(1); }
+}
+
+@keyframes orb-breathe-active {
+  0%, 100% { box-shadow: 0 0 8px 2px var(--gold-glow); opacity: 0.85; transform: scale(0.95); }
+  50% { box-shadow: 0 0 16px 4px var(--gold-glow); opacity: 1; transform: scale(1.08); }
+}
+
+.life-orb {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  align-self: center;
+  flex-shrink: 0;
+  animation: orb-breathe-idle 3.6s var(--ease-breathe) infinite;
+}
+
+.life-orb.active {
+  background: var(--gold);
+  animation: orb-breathe-active 1.1s var(--ease-breathe) infinite;
 }
 
 .session-header h2 {
@@ -428,13 +579,13 @@ button:active:not(:disabled) {
 }
 
 @keyframes message-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.994); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(8px) scale(0.994); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
 }
 
 .message {
   max-width: 640px;
-  animation: message-in 0.28s var(--ease) both;
+  animation: message-in 0.32s var(--ease) both;
 }
 
 /* Reloaded history renders instantly — the fade/slide-in is for things
@@ -721,15 +872,19 @@ button:active:not(:disabled) {
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 6px 0 var(--accent-glow);
   animation: thinking-bounce 1.1s ease-in-out infinite;
 }
 
 .thinking-indicator span:nth-child(2) {
   animation-delay: 0.15s;
+  background: var(--accent-soft);
 }
 
 .thinking-indicator span:nth-child(3) {
   animation-delay: 0.3s;
+  background: var(--gold);
+  box-shadow: 0 0 6px 0 var(--gold-glow);
 }
 
 .tool-stream {
@@ -767,7 +922,33 @@ button:active:not(:disabled) {
 }
 
 .tool-row.error {
-  border-color: #f87171;
+  border-color: var(--danger);
+}
+
+/* A running tool call reads like a spell being cast: a slow violet glow
+   breathing around the row rather than a static "running" label being
+   the only signal something is happening. */
+@keyframes rune-cast {
+  0%, 100% { box-shadow: 0 0 0 1px transparent, var(--shadow-sm); border-color: var(--border); }
+  50% { box-shadow: 0 0 16px -3px var(--accent-glow), var(--shadow-sm); border-color: var(--border-soft); }
+}
+
+.tool-row.start {
+  animation: rune-cast 1.7s var(--ease-breathe) infinite;
+}
+
+/* On completion, one brief golden flare — the spell "landing" — then it
+   settles back to the plain resting state. animation-fill-mode: both
+   keeps it from flashing again if the component re-renders with the
+   same "done" class already applied. */
+@keyframes rune-flare {
+  0% { box-shadow: 0 0 0 0 var(--gold-glow), var(--shadow-sm); }
+  35% { box-shadow: 0 0 20px 1px var(--gold-glow), var(--shadow-sm); border-color: rgba(224, 180, 92, 0.5); }
+  100% { box-shadow: 0 0 0 0 rgba(224, 180, 92, 0), var(--shadow-sm); }
+}
+
+.tool-row.done {
+  animation: rune-flare 0.7s var(--ease) both;
 }
 
 .tool-name {
@@ -823,7 +1004,7 @@ button:active:not(:disabled) {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #f87171;
+  background: var(--danger);
 }
 
 .tool-approve {
@@ -863,7 +1044,7 @@ button:active:not(:disabled) {
 }
 
 .diff-stat-add { color: #4ade80; }
-.diff-stat-del { color: #f87171; }
+.diff-stat-del { color: var(--danger); }
 
 .diff-view-btn {
   margin-left: auto;
@@ -1096,13 +1277,13 @@ button:active:not(:disabled) {
 .composer textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-dim);
+  box-shadow: 0 0 0 3px var(--accent-dim), 0 0 18px -6px var(--accent-glow);
 }
 
 .composer button.primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), #7a4fe0);
   border: none;
-  color: #0b0c10;
+  color: #fff;
   font-weight: 500;
   padding: 0 18px;
   border-radius: 8px;
@@ -1133,7 +1314,7 @@ button:active:not(:disabled) {
   margin-top: -5px;
   border-radius: 50%;
   border: 1.5px solid rgba(11, 12, 16, 0.35);
-  border-top-color: #0b0c10;
+  border-top-color: var(--bg);
   animation: spin 0.7s linear infinite;
 }
 
@@ -1189,7 +1370,7 @@ button:active:not(:disabled) {
 .settings-view button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0b0c10;
+  color: var(--bg);
   font-weight: 500;
 }
 
@@ -1229,24 +1410,46 @@ button:active:not(:disabled) {
   background: var(--surface-2);
   border: 1px solid var(--border);
   color: var(--text-dim);
-  border-radius: 6px;
-  padding: 4px 10px;
+  border-radius: 999px;
+  padding: 4px 12px 4px 10px;
   font-size: 12px;
   cursor: pointer;
   font-family: monospace;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A small sigil dot in front of each rune badge — lit (violet, gently
+   glowing) when the setting it represents is "on"/active, dim when it
+   isn't. Reuses the same visual language as the tool-row status dots. */
+.repo-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px 1px var(--accent-glow);
+  flex-shrink: 0;
 }
 
 .repo-badge:hover {
   border-color: var(--accent);
   color: var(--text);
+  box-shadow: 0 0 12px -2px var(--accent-glow);
 }
 
-/* The Planning pill flips to this once it's off — a quiet amber tint so
+/* The Planning pill flips to this once it's off — a quiet ember tint so
    "tool calls run unapproved right now" stays visible at a glance, not
    just in a click-through toggle state that looks the same either way. */
 .repo-badge.off {
-  border-color: rgba(251, 191, 36, 0.4);
-  color: #fbbf24;
+  border-color: rgba(224, 180, 92, 0.4);
+  color: var(--gold);
+}
+
+.repo-badge.off::before {
+  background: var(--gold);
+  box-shadow: 0 0 6px 1px var(--gold-glow);
 }
 
 .repo-link input {
@@ -1463,7 +1666,7 @@ button:active:not(:disabled) {
 .modal-actions button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0b0c10;
+  color: var(--bg);
 }
 
 .modal-actions button:disabled {
@@ -1524,7 +1727,7 @@ button.github-card:hover {
 }
 
 .github-state.closed {
-  color: #f87171;
+  color: var(--danger);
 }
 
 .github-card.list {
@@ -1558,7 +1761,7 @@ button.github-card:hover {
 }
 
 .github-card.error {
-  border-color: #f87171;
+  border-color: var(--danger);
 }
 
 .toggle input {
@@ -1594,12 +1797,13 @@ button.github-card:hover {
 }
 
 .engine-badge.starting .engine-dot {
-  background: #fbbf24;
+  background: var(--gold);
+  box-shadow: 0 0 6px var(--gold-glow);
   animation: subagent-pulse 1.2s ease-in-out infinite;
 }
 
 .engine-badge.error .engine-dot {
-  background: #f87171;
+  background: var(--danger);
 }
 
 .engine-label {
@@ -1784,11 +1988,11 @@ button.github-card:hover {
 }
 
 .subagent-card.awaiting .subagent-dot {
-  background: #fbbf24;
+  background: var(--gold);
 }
 
 .subagent-card.error .subagent-dot {
-  background: #f87171;
+  background: var(--danger);
 }
 
 .subagent-task {
@@ -1853,5 +2057,5 @@ button.github-card:hover {
 }
 
 .subagent-summary.fail {
-  color: #f87171;
+  color: var(--danger);
 }
