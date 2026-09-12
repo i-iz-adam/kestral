@@ -14,6 +14,77 @@ use crate::skills;
 use crate::subagent;
 use crate::tools;
 
+/// Infinite-loop detector: tracks recent tool calls and their results to
+/// detect when an agent is stuck in a repeating pattern with no progress.
+/// Each entry stores (tool_name, args_hash, result_hash) for a sliding window.
+#[derive(Default)]
+pub(crate) struct LoopDetector {
+    entries: Vec<(String, u64, u64)>,
+    max_history: usize,
+    same_tool_threshold: usize,
+}
+
+impl LoopDetector {
+    pub(crate) fn new(max_history: usize, same_tool_threshold: usize) -> Self {
+        Self { entries: Vec::with_capacity(max_history), max_history, same_tool_threshold }
+    }
+
+    pub(crate) fn record(&mut self, tool_name: String, args_json: &str, result: &str) {
+        let args_hash = Self::hash_str(args_json);
+        let result_hash = Self::hash_str(result);
+        self.entries.push((tool_name, args_hash, result_hash));
+        if self.entries.len() > self.max_history {
+            self.entries.remove(0);
+        }
+    }
+
+    fn hash_str(s: &str) -> u64 {
+        // Simple non-cryptographic hash for comparison purposes
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        s.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Returns true if we're stuck looping: same tool called consecutively
+    /// N times with the same args and same result (no progress).
+    pub(crate) fn is_looping(&self) -> bool {
+        if self.entries.len() < self.same_tool_threshold {
+            return false;
+        }
+        let start = self.entries.len() - self.same_tool_threshold;
+        let reference = &self.entries[start];
+        for i in (start + 1)..self.entries.len() {
+            if self.entries[i] != *reference {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// More aggressive check: same tool called N times regardless of args/result.
+    /// Catches cases where tool results vary but nothing meaningful changes.
+    pub(crate) fn is_stuck_on_same_tool(&self, consecutive_count: usize) -> bool {
+        if self.entries.len() < consecutive_count {
+            return false;
+        }
+        let start = self.entries.len() - consecutive_count;
+        let reference_name = &self.entries[start].0;
+        for i in (start + 1)..self.entries.len() {
+            if self.entries[i].0 != *reference_name {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[allow(dead_code)]
+    fn reset(&mut self) {
+        self.entries.clear();
+    }
+}
+
 /// Tool calls waiting on user approval (planning mode), keyed by the
 /// model's tool_call id, each holding the session it belongs to alongside
 /// the oneshot sender so a whole session's queue can be drained at once
@@ -97,7 +168,6 @@ struct TurnEndEvent<'a> {
     error: Option<&'a str>,
 }
 
-pub(crate) const MAX_STEPS: u32 = 12;
 pub(crate) const MODEL: &str = "auto/coding";
 
 pub(crate) fn is_mutating(name: &str) -> bool {
@@ -342,7 +412,12 @@ async fn run_turn_inner(
         }
     }
 
-    for _ in 0..MAX_STEPS {
+    let mut loop_detector = LoopDetector::new(20, 5);
+    let mut step_count: u64 = 0;
+
+    loop {
+        step_count += 1;
+
         let mut request_messages = vec![ChatMessage {
             role: "system".into(),
             content: Some(system_prompt.clone()),
@@ -422,15 +497,48 @@ async fn run_turn_inner(
                 None,
             )
             .await;
+
+            // Record for loop detection
+            loop_detector.record(
+                call.function.name.clone(),
+                &call.function.arguments,
+                tool_msg.content.as_deref().unwrap_or(""),
+            );
+
             session.messages.push(tool_msg);
         }
 
         sessions::save(app_handle, &session);
+
+        // Detect infinite loops after tool execution
+        if loop_detector.is_looping() || loop_detector.is_stuck_on_same_tool(10) {
+            let msg = format!(
+                "Stopped after {} steps: infinite loop detected (same tool call repeating with no progress).",
+                step_count
+            );
+            session.messages.push(ChatMessage {
+                role: "system".into(),
+                content: Some(msg.clone()),
+                ..Default::default()
+            });
+            sessions::save(app_handle, &session);
+            return Err(msg);
+        }
+
+        // Safety net: absolute maximum step limit
+        if step_count >= 1000 {
+            let msg = "Stopped after 1000 steps: maximum step limit reached.".to_string();
+            session.messages.push(ChatMessage {
+                role: "system".into(),
+                content: Some(msg.clone()),
+                ..Default::default()
+            });
+            sessions::save(app_handle, &session);
+            return Err(msg);
+        }
     }
-
-    Err("Hit the step limit for this turn (12 tool rounds) without a final answer".into())
 }
-
+/// Resolves a single pending approval by tool-call id.
 pub fn resolve_approval(approvals: &PendingApprovals, call_id: &str, approved: bool) {
     if let Some((_, tx)) = approvals.0.lock().unwrap().remove(call_id) {
         let _ = tx.send(approved);

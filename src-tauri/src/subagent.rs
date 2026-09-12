@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::agent::{self, PendingApprovals};
+use crate::agent::{self, PendingApprovals, LoopDetector};
 use crate::config;
 use crate::github;
 use crate::omniroute::{self, ChatMessage};
@@ -8,10 +8,6 @@ use crate::prompts;
 use crate::sessions::Session;
 use crate::skills;
 use crate::tools;
-
-/// Sub-agents get fewer steps than the top-level loop (agent::MAX_STEPS) —
-/// they're meant for bounded, focused tasks, not open-ended work.
-const SUBAGENT_MAX_STEPS: u32 = 10;
 
 /// The tool schema exposed to the parent agent. Deliberately just one tool:
 /// a task description in, a summary out. What the sub-agent does with that
@@ -93,7 +89,13 @@ pub(crate) async fn run(
     }
     let tools_value = Value::Array(tool_list);
 
-    for _ in 0..SUBAGENT_MAX_STEPS {
+    // Use the same loop detection as the main agent to catch infinite loops
+    let mut loop_detector = LoopDetector::new(20, 5);
+    let mut step_count: u64 = 0;
+
+    loop {
+        step_count += 1;
+
         let assistant_msg =
             omniroute::chat_completion(&cfg, agent::MODEL, &messages, Some(&tools_value)).await?;
         messages.push(assistant_msg.clone());
@@ -127,9 +129,31 @@ pub(crate) async fn run(
                 Some(parent_call_id),
             )
             .await;
+
+            // Record for loop detection
+            loop_detector.record(
+                call.function.name.clone(),
+                &call.function.arguments,
+                tool_msg.content.as_deref().unwrap_or(""),
+            );
+
             messages.push(tool_msg);
         }
-    }
 
-    Err("Sub-agent hit its step limit without finishing".into())
+        // Detect infinite loops: same tool call repeating with no progress
+        if loop_detector.is_looping() || loop_detector.is_stuck_on_same_tool(10) {
+            return Err(format!(
+                "Sub-agent stopped after {} steps: infinite loop detected (same tool call repeating with no progress).",
+                step_count
+            ));
+        }
+
+        // Safety net: absolute maximum step limit
+        if step_count >= 500 {
+            return Err(format!(
+                "Sub-agent stopped after {} steps: maximum step limit reached.",
+                step_count
+            ));
+        }
+    }
 }
