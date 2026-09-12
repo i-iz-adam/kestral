@@ -403,6 +403,26 @@ async fn run_turn_inner(
         for skill in skills::find_relevant(app_handle, &user_message) {
             if let Some(content) = skills::get_content(app_handle, &skill.id) {
                 emit_skill_loaded(app_handle, session_id, &skill);
+                // Persist the skill-loaded event to session.messages so it
+                // survives session switches and app restarts (restored by
+                // buildHistoryTimeline → SessionView.renderToolCard).
+                // Uses role "skill-loaded" so the frontend can exclude it
+                // from the visible message history while still rendering
+                // the SkillLoadedCard via the same code path as other tool
+                // calls — see historyTimeline.ts skip and the role-based
+                // branch in SessionView.renderToolCard.
+                let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
+                let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
+                session.messages.push(ChatMessage {
+                    role: "skill-loaded".into(),
+                    content: Some(serde_json::json!({
+                        "call_id": call_id,
+                        "name": "__skill_loaded__",
+                        "args": args,
+                        "result": skill.description.clone(),
+                    }).to_string()),
+                    ..Default::default()
+                });
                 skill_messages.push(ChatMessage {
                     role: "system".into(),
                     content: Some(format!("Relevant skill — {}:\n\n{}", skill.name, content)),

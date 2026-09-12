@@ -25,7 +25,31 @@ export function buildHistoryTimeline(messages: ChatMessage[]): HistoryItem[] {
   const items: HistoryItem[] = [];
 
   for (const m of messages) {
-    if (m.role === "tool") continue; // consumed below, via the call that produced it
+    // Tool results are consumed via the matching tool_call on the assistant
+    // message that triggered them — never rendered as standalone bubbles.
+    if (m.role === "tool") continue;
+
+    // Skill-loaded cards: convert to a tool item so SessionView.renderToolCard
+    // can show them as SkillLoadedCard in the persisted history (they survive
+    // session switches and app restarts this way). The serialization format
+    // must match what agent.rs writes when emitting the event.
+    if (m.role === "skill-loaded") {
+      const parsed = JSON.parse(m.content ?? "{}");
+      items.push({
+        kind: "tool" as const,
+        key: nextKey("tool"),
+        call: {
+          session_id: "",
+          call_id: parsed.call_id ?? "",
+          name: parsed.name ?? "__skill_loaded__",
+          status: "done" as const,
+          args: parsed.args ?? {},
+          result: parsed.result ?? "",
+        },
+      });
+      continue;
+    }
+
     if (m.role !== "user" && m.role !== "assistant") continue;
 
     if (m.content && m.content.trim()) {
