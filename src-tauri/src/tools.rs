@@ -168,6 +168,37 @@ pub fn tool_definitions() -> Value {
                     "required": ["command"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "Perform a web search query via OmniRoute (supports Tavily, Brave, Exa, Serper, etc.) to find current information, documentation, news, or articles on the internet.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "The search query string." },
+                        "provider": { "type": "string", "description": "Optional explicit search provider (e.g. 'tavily', 'brave', 'exa', 'serper'). If omitted, OmniRoute uses quota-aware fallback across configured search providers." },
+                        "limit": { "type": "integer", "description": "Optional maximum number of search results to return." }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "web_fetch",
+                "description": "Fetch and extract text/markdown content from a web page URL via OmniRoute (supports Firecrawl, Jina Reader, Tavily Extract, TinyFish Fetch, etc.).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "The complete URL of the web page to fetch and scrape." },
+                        "provider": { "type": "string", "description": "Optional explicit fetch provider (e.g. 'firecrawl', 'jina-reader', 'tavily-search', 'tinyfish'). If omitted, OmniRoute uses quota-aware fallback." }
+                    },
+                    "required": ["url"]
+                }
+            }
         }
     ])
 }

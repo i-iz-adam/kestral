@@ -364,3 +364,185 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     }
     Ok(msg)
 }
+
+pub async fn web_search(
+    cfg: &OmniRouteConfig,
+    query: &str,
+    provider: Option<&str>,
+    limit: Option<usize>,
+) -> Result<String, String> {
+    let base = base_url(cfg)?;
+    let url = format!("{}/v1/search", base);
+
+    let mut body = serde_json::json!({
+        "query": query,
+    });
+    if let Some(p) = provider {
+        if !p.trim().is_empty() {
+            body["provider"] = serde_json::json!(p.trim());
+        }
+    }
+    if let Some(l) = limit {
+        body["limit"] = serde_json::json!(l);
+    }
+
+    let client = reqwest::Client::new();
+    let mut req = client.post(&url).json(&body);
+    if let Some(key) = &cfg.api_key {
+        if !key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => return Ok(format!("Failed to connect to OmniRoute search endpoint: {}", e)),
+    };
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        if status.as_u16() == 429 {
+            return Ok("Web search rate limit / quota exceeded (HTTP 429). All search providers in OmniRoute pool (Tavily, Brave, Exa, Serper, etc.) may be rate limited or out of quota.".to_string());
+        }
+        if status.as_u16() == 404 {
+            return Ok("Web search failed (HTTP 404): The endpoint /v1/search was not found on your OmniRoute server. Ensure OmniRoute is running and up to date.".to_string());
+        }
+        let hint = if text.contains("provider") || text.contains("configured") || status.as_u16() == 400 || status.as_u16() == 500 {
+            "\nNote: Please ensure at least one search provider (such as Tavily, Brave, Exa, Serper, etc.) is configured in your OmniRoute providers dashboard."
+        } else {
+            ""
+        };
+        return Ok(format!("Web search error (HTTP {}): {}{}", status, text, hint));
+    }
+
+    if text.trim().is_empty() {
+        return Ok("Web search returned success but an empty response body.".to_string());
+    }
+
+    if let Ok(v) = serde_json::from_str::<Value>(&text) {
+        let results = v.get("results")
+            .or_else(|| v.get("data"))
+            .and_then(|r| r.as_array())
+            .or_else(|| v.as_array());
+
+        if let Some(items) = results {
+            if items.is_empty() {
+                return Ok(format!("No search results found for query: {:?}", query));
+            }
+            let mut formatted = Vec::new();
+            for (idx, item) in items.iter().enumerate() {
+                if let Some(obj) = item.as_object() {
+                    let title = obj.get("title").and_then(|t| t.as_str()).unwrap_or("Untitled");
+                    let link = obj.get("url").or_else(|| obj.get("link")).and_then(|u| u.as_str()).unwrap_or("");
+                    let snippet = obj.get("snippet")
+                        .or_else(|| obj.get("content"))
+                        .or_else(|| obj.get("description"))
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("");
+
+                    if !link.is_empty() {
+                        formatted.push(format!("{}. [{}]({})\n{}", idx + 1, title, link, snippet));
+                    } else {
+                        formatted.push(format!("{}. {}\n{}", idx + 1, title, snippet));
+                    }
+                } else if let Some(s) = item.as_str() {
+                    formatted.push(format!("{}. {}", idx + 1, s));
+                }
+            }
+            if !formatted.is_empty() {
+                return Ok(formatted.join("\n\n"));
+            }
+        }
+        return Ok(text);
+    }
+
+    Ok(text)
+}
+
+pub async fn web_fetch(
+    cfg: &OmniRouteConfig,
+    url_str: &str,
+    provider: Option<&str>,
+) -> Result<String, String> {
+    let base = base_url(cfg)?;
+    let endpoint = format!("{}/v1/web/fetch", base);
+
+    let mut body = serde_json::json!({
+        "url": url_str,
+    });
+    if let Some(p) = provider {
+        if !p.trim().is_empty() {
+            body["provider"] = serde_json::json!(p.trim());
+        }
+    }
+
+    let client = reqwest::Client::new();
+    let mut req = client.post(&endpoint).json(&body);
+    if let Some(key) = &cfg.api_key {
+        if !key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => return Ok(format!("Failed to connect to OmniRoute web fetch endpoint: {}", e)),
+    };
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        if status.as_u16() == 429 {
+            return Ok("Web fetch rate limit / quota exceeded (HTTP 429). All web fetch providers in OmniRoute pool (Firecrawl, Jina Reader, Tavily Extract, TinyFish Fetch) may be rate limited or out of quota.".to_string());
+        }
+        if status.as_u16() == 404 {
+            return Ok("Web fetch failed (HTTP 404): The endpoint /v1/web/fetch was not found on your OmniRoute server. Ensure OmniRoute is running and up to date.".to_string());
+        }
+        let hint = if text.contains("provider") || text.contains("configured") || status.as_u16() == 400 || status.as_u16() == 500 {
+            "\nNote: Please ensure at least one web-fetch provider (such as Firecrawl, Jina Reader, Tavily Extract, TinyFish Fetch) is configured in your OmniRoute providers dashboard."
+        } else {
+            ""
+        };
+        return Ok(format!("Web fetch error (HTTP {}): {}{}", status, text, hint));
+    }
+
+    if text.trim().is_empty() {
+        return Ok("Web fetch returned success but an empty response body.".to_string());
+    }
+
+    if let Ok(v) = serde_json::from_str::<Value>(&text) {
+        let content = v.get("markdown")
+            .or_else(|| v.get("content"))
+            .or_else(|| v.get("text"))
+            .or_else(|| v.get("data").and_then(|d| d.get("markdown").or_else(|| d.get("content"))))
+            .and_then(|c| c.as_str());
+
+        let title = v.get("title")
+            .or_else(|| v.get("data").and_then(|d| d.get("title")))
+            .and_then(|t| t.as_str());
+
+        let result_str = match (title, content) {
+            (Some(t), Some(c)) => format!("# {}\n\n{}", t, c),
+            (None, Some(c)) => c.to_string(),
+            (Some(t), None) => format!("# {}\n\n{}", t, text),
+            (None, None) => text.clone(),
+        };
+
+        const MAX_LEN: usize = 50_000;
+        if result_str.len() > MAX_LEN {
+            let truncated: String = result_str.chars().take(MAX_LEN).collect();
+            return Ok(format!("{}\n\n[Content truncated at 50,000 characters]", truncated));
+        }
+        return Ok(result_str);
+    }
+
+    const MAX_LEN: usize = 50_000;
+    if text.len() > MAX_LEN {
+        let truncated: String = text.chars().take(MAX_LEN).collect();
+        return Ok(format!("{}\n\n[Content truncated at 50,000 characters]", truncated));
+    }
+    Ok(text)
+}

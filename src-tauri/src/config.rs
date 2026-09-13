@@ -44,16 +44,6 @@ pub struct OmniRouteConfig {
     pub mode: String,
     pub remote_url: Option<String>,
     pub api_key: Option<String>,
-    /// The hosted-tool type string OmniRoute expects to turn on web search
-    /// for a request (e.g. "web_search") — sent as an extra `{"type": ...}`
-    /// entry in the `tools` array alongside our own function tools when
-    /// set. Left blank by default: this app doesn't have OmniRoute's own
-    /// tool-calling contract on hand, so rather than guess at (and risk
-    /// silently misusing) a hard-coded value, this is exposed as a plain
-    /// field in Providers for the person to fill in from OmniRoute's own
-    /// docs for whatever they have it routing to.
-    #[serde(default)]
-    pub web_search_tool: Option<String>,
 }
 
 fn app_config_dir(app_handle: &tauri::AppHandle) -> PathBuf {

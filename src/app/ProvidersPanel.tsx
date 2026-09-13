@@ -11,16 +11,11 @@ export default function ProvidersPanel() {
   const [baseUrl, setBaseUrl] = useState<string | null>(null);
   const [engineStatus, setEngineStatus] = useState<EngineStatus>("stopped");
   const [reloadKey, setReloadKey] = useState(0);
-  const [fullConfig, setFullConfig] = useState<OmniRouteConfigPayload | null>(null);
-  const [searchTool, setSearchTool] = useState("");
-  const [searchToolSaved, setSearchToolSaved] = useState(false);
 
   useEffect(() => {
     invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then((cfg) => {
       if (!cfg) return;
-      setFullConfig(cfg);
       setMode(cfg.mode);
-      setSearchTool(cfg.web_search_tool ?? "");
       if (cfg.mode === "remote") {
         setBaseUrl(cfg.remote_url ? cfg.remote_url.replace(/\/$/, "") : null);
       } else {
@@ -38,15 +33,6 @@ export default function ProvidersPanel() {
       unlisten.then((f) => f());
     };
   }, []);
-
-  const saveSearchTool = async () => {
-    if (!fullConfig) return;
-    const next: OmniRouteConfigPayload = { ...fullConfig, web_search_tool: searchTool.trim() || null };
-    await invoke("save_omniroute_config", { config: next });
-    setFullConfig(next);
-    setSearchToolSaved(true);
-    setTimeout(() => setSearchToolSaved(false), 2000);
-  };
 
   if (mode === null) {
     return (
@@ -77,26 +63,6 @@ export default function ProvidersPanel() {
         </div>
       </div>
 
-      <div className="search-tool-row">
-        <label htmlFor="search-tool-input">
-          Web search tool type <span className="hint small">(advanced, optional)</span>
-        </label>
-        <div className="search-tool-input-row">
-          <input
-            id="search-tool-input"
-            value={searchTool}
-            onChange={(e) => setSearchTool(e.target.value)}
-            placeholder="e.g. web_search — leave blank to disable"
-          />
-          <button onClick={saveSearchTool}>{searchToolSaved ? "Saved" : "Save"}</button>
-        </div>
-        <p className="hint small">
-          If your OmniRoute route supports a hosted web-search tool, put its
-          tool "type" string here (check OmniRoute's own docs for the exact
-          value) — it gets passed straight through in every coding session's
-          tool list. Leave blank to leave web search off.
-        </p>
-      </div>
 
       {!showFrame ? (
         <div className="empty-state">

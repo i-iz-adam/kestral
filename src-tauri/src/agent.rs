@@ -317,6 +317,20 @@ pub(crate) async fn execute_tool(
             .ok_or("GitHub is not connected — add a token in the GitHub tab first")?;
         return github::execute(&token, &session.workspace, name, args).await;
     }
+    if name == "web_search" || name == "web_fetch" {
+        let cfg = config::load_omniroute_config(app_handle)
+            .ok_or("No OmniRoute config saved yet — finish setup first")?;
+        if name == "web_search" {
+            let query = args.get("query").and_then(|v| v.as_str()).ok_or("missing query parameter")?;
+            let provider = args.get("provider").and_then(|v| v.as_str());
+            let limit = args.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize);
+            return omniroute::web_search(&cfg, query, provider, limit).await;
+        } else {
+            let url = args.get("url").and_then(|v| v.as_str()).ok_or("missing url parameter")?;
+            let provider = args.get("provider").and_then(|v| v.as_str());
+            return omniroute::web_fetch(&cfg, url, provider).await;
+        }
+    }
     tools::execute(&session.workspace, name, args)
 }
 
@@ -479,14 +493,7 @@ async fn run_turn_inner(
         if session.subagents_enabled {
             all.extend(subagent::tool_definitions().as_array().cloned().unwrap_or_default());
         }
-        // Best-effort: if a hosted web-search tool type is configured for
-        // OmniRoute (see config::OmniRouteConfig::web_search_tool), pass it
-        // through alongside our own function tools. Whether/how OmniRoute
-        // actually executes this is outside this app's code — it's a
-        // pass-through, not something handled in tools.rs.
-        if let Some(search_tool) = cfg.web_search_tool.as_ref().filter(|s| !s.is_empty()) {
-            all.push(serde_json::json!({ "type": search_tool }));
-        }
+
         Some(Value::Array(all))
     };
 

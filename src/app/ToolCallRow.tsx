@@ -29,7 +29,10 @@ function summarizeArgs(name: string, args: unknown): string | null {
     case "list_dir":
       return str(a.path) ?? ".";
     case "search_code":
+    case "web_search":
       return str(a.query) ? `"${a.query}"` : null;
+    case "web_fetch":
+      return str(a.url) ?? null;
     case "find_files":
       return str(a.pattern) ?? null;
     case "run_shell":

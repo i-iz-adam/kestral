@@ -104,7 +104,6 @@ export interface OmniRouteConfigPayload {
   mode: "local" | "remote";
   remote_url: string | null;
   api_key: string | null;
-  web_search_tool?: string | null;
 }
 
 export interface Skill {
