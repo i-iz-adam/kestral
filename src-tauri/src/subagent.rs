@@ -63,14 +63,18 @@ pub(crate) async fn run(
     // equivalent of a user message — a sub-agent asked to "add tests for
     // the parser" should get the testing skill without needing to
     // remember list_skills/read_skill exist any more than the parent does.
+    // Each unique skill is loaded into the sub-agent context at most once.
+    let mut subagent_loaded_skills = std::collections::HashSet::new();
     for skill in skills::find_relevant(app_handle, task) {
-        if let Some(content) = skills::get_content(app_handle, &skill.id) {
-            agent::emit_skill_loaded(app_handle, &session.id, &skill);
-            messages.push(ChatMessage {
-                role: "system".into(),
-                content: Some(format!("Relevant skill — {}:\n\n{}", skill.name, content)),
-                ..Default::default()
-            });
+        if subagent_loaded_skills.insert(skill.id.clone()) {
+            if let Some(content) = skills::get_content(app_handle, &skill.id) {
+                agent::emit_skill_loaded(app_handle, &session.id, &skill);
+                messages.push(ChatMessage {
+                    role: "system".into(),
+                    content: Some(format!("Relevant skill — {}:\n\n{}", skill.name, content)),
+                    ..Default::default()
+                });
+            }
         }
     }
 

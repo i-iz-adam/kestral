@@ -484,36 +484,43 @@ async fn run_turn_inner(
     // Announced once per turn (not per tool-call round) and injected as
     // extra system context on every step of this turn, so the guidance
     // stays present through however many tool rounds the turn takes.
+    // Deduplicated per session context so each unique skill is auto-loaded
+    // into context only once.
     let mut skill_messages: Vec<ChatMessage> = Vec::new();
     if session.mode != "general" {
+        let mut loaded_skill_ids = skills::get_loaded_skill_ids(&session);
+
         for skill in skills::find_relevant(app_handle, &user_message) {
-            if let Some(content) = skills::get_content(app_handle, &skill.id) {
-                emit_skill_loaded(app_handle, session_id, &skill);
-                // Persist the skill-loaded event to session.messages so it
-                // survives session switches and app restarts (restored by
-                // buildHistoryTimeline → SessionView.renderToolCard).
-                // Uses role "skill-loaded" so the frontend can exclude it
-                // from the visible message history while still rendering
-                // the SkillLoadedCard via the same code path as other tool
-                // calls — see historyTimeline.ts skip and the role-based
-                // branch in SessionView.renderToolCard.
-                let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
-                let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
-                session.messages.push(ChatMessage {
-                    role: "skill-loaded".into(),
-                    content: Some(serde_json::json!({
-                        "call_id": call_id,
-                        "name": "__skill_loaded__",
-                        "args": args,
-                        "result": skill.description.clone(),
-                    }).to_string()),
-                    ..Default::default()
-                });
-                skill_messages.push(ChatMessage {
-                    role: "system".into(),
-                    content: Some(format!("Relevant skill — {}:\n\n{}", skill.name, content)),
-                    ..Default::default()
-                });
+            if !loaded_skill_ids.contains(&skill.id) {
+                if skills::get_content(app_handle, &skill.id).is_some() {
+                    emit_skill_loaded(app_handle, session_id, &skill);
+                    let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
+                    let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
+                    session.messages.push(ChatMessage {
+                        role: "skill-loaded".into(),
+                        content: Some(serde_json::json!({
+                            "call_id": call_id,
+                            "name": "__skill_loaded__",
+                            "args": args,
+                            "result": skill.description.clone(),
+                        }).to_string()),
+                        ..Default::default()
+                    });
+                    loaded_skill_ids.insert(skill.id.clone());
+                }
+            }
+        }
+
+        let all_skills = skills::list(app_handle);
+        for id in &loaded_skill_ids {
+            if let Some(skill_info) = all_skills.iter().find(|s| &s.id == id) {
+                if let Some(content) = skills::get_content(app_handle, id) {
+                    skill_messages.push(ChatMessage {
+                        role: "system".into(),
+                        content: Some(format!("Relevant skill — {}:\n\n{}", skill_info.name, content)),
+                        ..Default::default()
+                    });
+                }
             }
         }
     }
