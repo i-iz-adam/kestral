@@ -158,6 +158,16 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     invoke("send_message", { sessionId, message: text }).catch(() => {});
   };
 
+  // The Stop button's handler — the backend sets a stop flag for the
+  // session, resolves any pending approvals, and lets the running turn
+  // (and any live sub-agents) wind down, persisting what it got through.
+  // The agent://turn-end event carries reason "stopped" and the store
+  // turns that into a system note, so there's nothing to do here beyond
+  // firing the request and avoiding an unhandled rejection.
+  const stop = () => {
+    invoke("stop_session", { sessionId }).catch(() => {});
+  };
+
   const approve = (callId: string, approved: boolean) => {
     invoke("approve_tool_call", { callId, approved });
   };
@@ -386,8 +396,23 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                 : "Ask anything..."
             }
           />
-          <button className={"primary" + (sending ? " sending" : "")} onClick={send} disabled={sending}>
-            {sending ? "Working" : "Send"}
+          <button
+            className={"primary send-btn" + (sending ? " sending" : "")}
+            onClick={sending ? stop : send}
+            title={sending ? "Stop the agent" : "Send message"}
+            aria-label={sending ? "Stop the agent" : "Send message"}
+          >
+            <span className="face face-send">{sending ? null : "Send"}</span>
+            <span className="face face-stop">
+              {sending ? (
+                <>
+                  <svg className="square" viewBox="0 0 10 10" aria-hidden="true">
+                    <rect width="10" height="10" />
+                  </svg>
+                  Stop
+                </>
+              ) : null}
+            </span>
           </button>
         </div>
       </div>

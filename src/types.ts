@@ -1,6 +1,7 @@
 export interface SessionDefaults {
   planning_enabled: boolean;
   subagents_enabled: boolean;
+  graceful_stop: boolean;
 }
 
 export interface ToolCall {
@@ -22,6 +23,7 @@ export interface Session {
   title: string;
   mode: "coding" | "general";
   planning_enabled: boolean;
+  graceful_stop: boolean;
   workspace: string;
   subagents_enabled: boolean;
   messages: ChatMessage[];
@@ -73,6 +75,7 @@ export interface MessageCancelEventPayload {
 export interface TurnEndEventPayload {
   session_id: string;
   error?: string | null;
+  reason?: "normal" | "stopped" | null;
 }
 
 /** One entry in the session's chronological view â€” a chat bubble or a

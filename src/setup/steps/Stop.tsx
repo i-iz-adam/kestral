@@ -3,17 +3,15 @@ import { invoke } from "@tauri-apps/api/tauri";
 import type { StepProps } from "../types";
 import type { SessionDefaults } from "../../types";
 
-export default function Defaults({ onComplete }: StepProps) {
-  const [planningEnabled, setPlanningEnabled] = useState(true);
-  const [subagentsEnabled, setSubagentsEnabled] = useState(true);
+export default function Stop({ onComplete }: StepProps) {
   const [gracefulStop, setGracefulStop] = useState(true);
+  const [currentDefaults, setCurrentDefaults] = useState<SessionDefaults | null>(null);
 
   useEffect(() => {
     invoke<SessionDefaults>("get_session_defaults")
       .then((d) => {
         if (d) {
-          setPlanningEnabled(d.planning_enabled ?? true);
-          setSubagentsEnabled(d.subagents_enabled ?? true);
+          setCurrentDefaults(d);
           setGracefulStop(d.graceful_stop ?? true);
         }
       })
@@ -25,8 +23,7 @@ export default function Defaults({ onComplete }: StepProps) {
   const handleContinue = async () => {
     await invoke("save_session_defaults", {
       defaults: {
-        planning_enabled: planningEnabled,
-        subagents_enabled: subagentsEnabled,
+        ...(currentDefaults || { planning_enabled: true, subagents_enabled: true }),
         graceful_stop: gracefulStop,
       },
     });
@@ -35,27 +32,11 @@ export default function Defaults({ onComplete }: StepProps) {
 
   return (
     <div className="step-card">
-      <h2>Session defaults</h2>
+      <h2>Stop Button</h2>
       <p>
-        Configure the default settings applied to all newly created sessions.
+        You can now stop a turn in progress. While the agent is working, the "Send" button will turn into a "Stop" button.
       </p>
       <div className="field-group">
-        <label>
-          <input
-            type="checkbox"
-            checked={planningEnabled}
-            onChange={(e) => setPlanningEnabled(e.target.checked)}
-          />{" "}
-          Planning mode by default (approve writes/commands)
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={subagentsEnabled}
-            onChange={(e) => setSubagentsEnabled(e.target.checked)}
-          />{" "}
-          Use sub-agents by default to keep context clean
-        </label>
         <label>
           <input
             type="checkbox"

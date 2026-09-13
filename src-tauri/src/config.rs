@@ -2,10 +2,26 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDefaults {
     pub planning_enabled: bool,
     pub subagents_enabled: bool,
+    /// How the Stop button treats live sub-agents. With graceful stop on
+    /// (the default — this is why the feature exists), stopping a running
+    /// turn lets each in-flight sub-agent wind down just far enough to
+    /// hand back a distilled overview of what it got through; that
+    /// summary lands as the sub-agent's delegate result, so it shows up
+    /// in the chat AND is persisted for the next time the conversation is
+    /// continued. With it off, sub-agents are interrupted the moment the
+    /// current step finishes, with no overview. Either way the top-level
+    /// turn ends as soon as its in-flight work settles, and everything the
+    /// turn did up to that point is saved.
+    #[serde(default = "default_true")]
+    pub graceful_stop: bool,
 }
 
 impl Default for SessionDefaults {
@@ -13,6 +29,7 @@ impl Default for SessionDefaults {
         Self {
             planning_enabled: true,
             subagents_enabled: true,
+            graceful_stop: true,
         }
     }
 }

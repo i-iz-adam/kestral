@@ -1,9 +1,11 @@
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant};
 use tauri::Manager;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 
 use crate::config;
 use crate::github;
@@ -103,6 +105,118 @@ impl LoopDetector {
 #[derive(Default)]
 pub struct PendingApprovals(pub Mutex<HashMap<String, (String, oneshot::Sender<bool>)>>);
 
+/// Per-session stop state, shared between the top-level turn loop and any
+/// sub-agent loops that turn spawned (a sub-agent is told to check the
+/// SAME session's flag, not one of its own — stopping the chat stops its
+/// sub-agents too, which is the whole feature). The flag is set the moment
+/// the Stop button lands and is never unset during that turn; the turn
+/// loop picks it up at its next step boundary, and in-flight approval
+/// waits are woken immediately via the `Notify`.
+pub struct SessionStop {
+    requested: AtomicBool,
+    notify: Notify,
+}
+
+/// Registry of stop requests, keyed by session id. Entries are created
+/// lazily on the first request_stop call and garbage-collected once no
+/// turn (or sub-agent) for that session is still running, so a stop
+/// request the user made is never forgotten mid-turn no matter how many
+/// loops are checking it. Shared globally (not per-session) so any thread
+/// can request a stop without needing to know which loop is running.
+#[derive(Default)]
+pub struct StopRequests(Mutex<HashMap<String, Weak<SessionStop>>>);
+
+const STOP_POLL_SECS: f64 = 0.1;
+
+impl SessionStop {
+    /// Whether a stop was requested for this session.
+    pub(crate) fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::Relaxed)
+    }
+
+    /// Waits until either `duration` elapses or a stop is requested,
+    /// returning early the moment a stop lands. Used to keep a
+    /// long-running, non-cancellable chunk of work (a sub-agent winding
+    /// down, a blocking tool) interruptible without propping a full stop
+    /// through every layer of the call stack.
+    pub(crate) async fn sleep_till_stop_or(&self, duration: Duration) {
+        let until = Instant::now() + duration;
+        loop {
+            if self.requested.load(Ordering::Relaxed) {
+                return;
+            }
+            let remaining = until.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return;
+            }
+            let sleep = remaining.min(Duration::from_secs_f64(STOP_POLL_SECS));
+            tokio::time::sleep(sleep).await;
+        }
+    }
+}
+
+impl StopRequests {
+    /// Creates (or returns the existing) stop flag for a session, keeping
+    /// it alive for as long as the returned Arc — which the turn loop and
+    /// every sub-agent it spawns holds. The registry itself only holds a
+    /// Weak reference so it can't leak a session's stop state forever.
+    pub(crate) fn entry(&self, session_id: &str) -> Arc<SessionStop> {
+        let mut map = self.0.lock().unwrap();
+        if let Some(weak) = map.get(session_id) {
+            if let Some(arc) = weak.upgrade() {
+                return arc;
+            }
+        }
+        let arc = Arc::new(SessionStop {
+            requested: AtomicBool::new(false),
+            notify: Notify::new(),
+        });
+        map.insert(session_id.to_string(), Arc::downgrade(&arc));
+        arc
+    }
+
+    /// True if a stop has been requested for this session. Takes the Arc
+    /// so callers don't have to, and so this works even from code that
+    /// only has a session id (not a loop holding its own handle).
+    pub(crate) fn is_requested(&self, session_id: &str) -> bool {
+        let map = self.0.lock().unwrap();
+        map.get(session_id).and_then(|w| w.upgrade()).is_some_and(|s| s.requested.load(Ordering::Relaxed))
+    }
+
+    /// Marks a session as stop-requested and wakes any in-flight waiters
+    /// (approval prompts, tool calls) so they settle immediately instead
+    /// of waiting out their normal completion.
+    pub(crate) fn request(&self, session_id: &str) {
+        let arc = self.entry(session_id);
+        arc.requested.store(true, Ordering::Relaxed);
+        arc.notify.notify_waiters();
+    }
+
+    /// Clears a previously-requested stop. Only used at the very start of
+    /// a brand-new turn, so a stop that was requested (but that the turn
+    /// ran to completion on) doesn't leak into the next turn.
+    pub(crate) fn reset(&self, session_id: &str) {
+        let map = self.0.lock().unwrap();
+        if let Some(weak) = map.get(session_id) {
+            if let Some(arc) = weak.upgrade() {
+                arc.requested.store(false, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Drops any registry entry whose stop flag no loop is holding
+    /// anymore (its last Arc went away when the turn ended). Called once
+    /// at the end of a turn so the registry can't accumulate a stale
+    /// entry per session forever.
+    pub(crate) fn cleanup(&self, session_id: &str) {
+        let map = self.0.lock().unwrap();
+        if map.get(session_id).is_some_and(|w| w.strong_count() == 0) {
+            drop(map);
+            self.0.lock().unwrap().remove(session_id);
+        }
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub(crate) struct ToolEvent<'a> {
     session_id: &'a str,
@@ -161,17 +275,26 @@ struct MessageCancelEvent<'a> {
 }
 
 /// Emitted exactly once, no matter which path a turn exits through
-/// (finished normally, hit an error, hit the step limit) — the frontend's
-/// single source of truth for "this turn is over," used to know when it's
-/// safe to stop treating a session as live and fall back entirely to its
-/// persisted history. Session-scoped rather than tied to any particular
-/// view being open, since the turn itself runs independently of whether
-/// anyone is looking at it (see run_turn's wrapper below).
+/// (finished normally, hit an error, hit the step limit, or was stopped
+/// by the user) — the frontend's single source of truth for "this turn is
+/// over," used to know when it's safe to stop treating a session as live
+/// and fall back entirely to its persisted history, and to distinguish a
+/// deliberate stop (progress saved, no error) from a failure. Session-
+/// scoped rather than tied to any particular view being open, since the
+/// turn itself runs independently of whether anyone is looking at it (see
+/// run_turn's wrapper below). `reason` is "normal" when the turn finished
+/// on its own and "stopped" when the Stop button (or a stop_session call)
+/// interrupted it — the frontend surfaces the latter as a quiet system
+/// note rather than an error.
 #[derive(Clone, Serialize)]
 struct TurnEndEvent<'a> {
     session_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'a str>,
+    /// "normal" | "stopped" — absent on events from older backends so the
+    /// frontend treats it as "normal" (plain end) whenever it's missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a str>,
 }
 
 #[derive(Clone, Serialize)]
@@ -298,6 +421,8 @@ pub(crate) fn emit_skill_loaded(app_handle: &tauri::AppHandle, session_id: &str,
 pub(crate) async fn execute_tool(
     app_handle: &tauri::AppHandle,
     approvals: &PendingApprovals,
+    stops: &StopRequests,
+    stop_flag: Arc<SessionStop>,
     session: &Session,
     call_id: &str,
     name: &str,
@@ -307,7 +432,7 @@ pub(crate) async fn execute_tool(
         let task = args.get("task").and_then(|v| v.as_str()).ok_or("missing task")?;
         // Boxed to break the async recursion cycle:
         // execute_tool -> subagent::run -> handle_tool_call -> execute_tool.
-        return Box::pin(subagent::run(app_handle, approvals, session, call_id, task)).await;
+        return Box::pin(subagent::run(app_handle, approvals, stops, stop_flag, session, call_id, task)).await;
     }
     if let Some(result) = skills::maybe_execute(app_handle, name, args) {
         return result;
@@ -342,6 +467,8 @@ pub(crate) async fn execute_tool(
 pub(crate) async fn handle_tool_call(
     app_handle: &tauri::AppHandle,
     approvals: &PendingApprovals,
+    stops: &StopRequests,
+    stop_flag: Arc<SessionStop>,
     session: &Session,
     session_id: &str,
     call: &ToolCall,
@@ -373,7 +500,12 @@ pub(crate) async fn handle_tool_call(
             Some(args.clone()), None, parent_call_id,
         );
 
-        let approved = rx.await.unwrap_or(false);
+        let approved = tokio::select! {
+            decision = rx => decision.unwrap_or(false),
+            _ = stop_flag.notify.notified() => {
+                false
+            }
+        };
         if !approved {
             let result = "Rejected by user.".to_string();
             emit_tool_event(
@@ -390,7 +522,7 @@ pub(crate) async fn handle_tool_call(
         }
     }
 
-    let result = execute_tool(app_handle, approvals, session, &call.id, &call.function.name, &args)
+    let result = execute_tool(app_handle, approvals, stops, stop_flag, session, &call.id, &call.function.name, &args)
         .await
         .unwrap_or_else(|e| format!("error: {}", e));
 
@@ -420,20 +552,42 @@ pub(crate) async fn handle_tool_call(
 pub async fn run_turn(
     app_handle: tauri::AppHandle,
     approvals: tauri::State<'_, PendingApprovals>,
+    stops: tauri::State<'_, StopRequests>,
     session_id: String,
     user_message: String,
 ) -> Result<(), String> {
-    let result = run_turn_inner(&app_handle, approvals, &session_id, user_message).await;
+    run_turn_with_stop(app_handle, approvals, stops, session_id, user_message).await
+}
+
+pub async fn run_turn_with_stop(
+    app_handle: tauri::AppHandle,
+    approvals: tauri::State<'_, PendingApprovals>,
+    stops: tauri::State<'_, StopRequests>,
+    session_id: String,
+    user_message: String,
+) -> Result<(), String> {
+    stops.reset(&session_id);
+    let stop_flag = stops.entry(&session_id);
+    let result = run_turn_inner(&app_handle, approvals, &stops, stop_flag.clone(), &session_id, user_message).await;
+    let reason = if stop_flag.requested.load(Ordering::Relaxed) { "stopped" } else { "normal" };
     let _ = app_handle.emit_all(
         "agent://turn-end",
-        TurnEndEvent { session_id: &session_id, error: result.as_ref().err().map(String::as_str) },
+        TurnEndEvent {
+            session_id: &session_id,
+            error: result.as_ref().err().map(String::as_str),
+            reason: if reason == "normal" { None } else { Some(reason) },
+        },
     );
+    drop(stop_flag);
+    stops.cleanup(&session_id);
     result
 }
 
 async fn run_turn_inner(
     app_handle: &tauri::AppHandle,
     approvals: tauri::State<'_, PendingApprovals>,
+    stops: &StopRequests,
+    stop_flag: Arc<SessionStop>,
     session_id: &str,
     user_message: String,
 ) -> Result<(), String> {
@@ -556,6 +710,11 @@ async fn run_turn_inner(
     loop {
         step_count += 1;
 
+        if stop_flag.requested.load(Ordering::Relaxed) {
+            sessions::save(app_handle, &session);
+            return Ok(());
+        }
+
         let mut request_messages = vec![ChatMessage {
             role: "system".into(),
             content: Some(system_prompt.clone()),
@@ -644,6 +803,8 @@ async fn run_turn_inner(
             let tool_msg = handle_tool_call(
                 app_handle,
                 approvals.inner(),
+                stops,
+                stop_flag.clone(),
                 &session,
                 session_id,
                 call,
@@ -654,6 +815,10 @@ async fn run_turn_inner(
             call_signatures.push((call.function.name.clone(), call.function.arguments.clone()));
             all_tool_names_this_turn.push(call.function.name.clone());
             session.messages.push(tool_msg);
+
+            if stop_flag.requested.load(Ordering::Relaxed) {
+                break;
+            }
         }
 
         // One signature per turn (reasoning text + every call it made this

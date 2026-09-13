@@ -5,6 +5,7 @@ import OmniRouteConfig from "./steps/OmniRouteConfig";
 import Defaults from "./steps/Defaults";
 import Workspace from "./steps/Workspace";
 import Finish from "./steps/Finish";
+import Stop from "./steps/Stop";
 
 // Add new steps here AND to step_registry() in src-tauri/src/setup.rs,
 // using the same id string in both places. Existing users who already
@@ -15,5 +16,6 @@ export const stepComponents: Record<string, ComponentType<StepProps>> = {
   omniroute: OmniRouteConfig,
   defaults: Defaults,
   workspace: Workspace,
+  stop: Stop,
   finish: Finish,
 };

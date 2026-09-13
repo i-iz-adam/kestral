@@ -23,6 +23,13 @@ pub struct Session {
     /// default behavior, not an opt-in.
     #[serde(default = "default_true")]
     pub subagents_enabled: bool,
+    /// Whether this session's Stop button does a graceful stop (live
+    /// sub-agents wind down and hand back an overview) vs. an instant one
+    /// (no overview). Defaults to true, matching the app-wide session
+    /// default — a session from before this field existed stays on the
+    /// graceful path.
+    #[serde(default = "default_true")]
+    pub graceful_stop: bool,
     pub messages: Vec<ChatMessage>,
     pub created_at: u64,
     /// Counts turns since the last skill-distillation reflection pass (see
@@ -59,6 +66,7 @@ pub fn create(
     workspace: String,
     planning_enabled: bool,
     subagents_enabled: bool,
+    graceful_stop: bool,
 ) -> Session {
     let session = Session {
         id: Uuid::new_v4().to_string(),
@@ -67,6 +75,7 @@ pub fn create(
         planning_enabled,
         workspace,
         subagents_enabled,
+        graceful_stop,
         messages: vec![],
         created_at: now_ms(),
         turns_since_reflection: 0,
@@ -85,6 +94,13 @@ pub fn set_workspace(app_handle: &tauri::AppHandle, id: &str, workspace: String)
 pub fn set_subagents_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.subagents_enabled = enabled;
+    save(app_handle, &session);
+    Ok(())
+}
+
+pub fn set_graceful_stop(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+    let mut session = load(app_handle, id).ok_or("Session not found")?;
+    session.graceful_stop = enabled;
     save(app_handle, &session);
     Ok(())
 }

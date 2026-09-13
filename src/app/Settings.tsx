@@ -19,6 +19,7 @@ export default function Settings() {
 
   const [defaultPlanning, setDefaultPlanning] = useState(true);
   const [defaultSubagents, setDefaultSubagents] = useState(true);
+  const [defaultGracefulStop, setDefaultGracefulStop] = useState(true);
   const [defaultsSaved, setDefaultsSaved] = useState(false);
 
   useEffect(() => {
@@ -43,6 +44,7 @@ export default function Settings() {
       if (defs) {
         setDefaultPlanning(defs.planning_enabled ?? true);
         setDefaultSubagents(defs.subagents_enabled ?? true);
+        setDefaultGracefulStop(defs.graceful_stop ?? true);
       }
     });
   }, []);
@@ -103,6 +105,7 @@ export default function Settings() {
       defaults: {
         planning_enabled: defaultPlanning,
         subagents_enabled: defaultSubagents,
+        graceful_stop: defaultGracefulStop,
       },
     });
     setDefaultsSaved(true);
@@ -213,6 +216,14 @@ export default function Settings() {
               onChange={(e) => setDefaultSubagents(e.target.checked)}
             />
             Use sub-agents by default to keep context clean
+          </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={defaultGracefulStop}
+              onChange={(e) => setDefaultGracefulStop(e.target.checked)}
+            />
+            Graceful stop (sub-agents return an overview when you stop)
           </label>
         </div>
         <button

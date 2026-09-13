@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
+use std::sync::Arc;
 
-use crate::agent::{self, PendingApprovals, LoopDetector};
+use crate::agent::{self, PendingApprovals, StopRequests, SessionStop, LoopDetector};
 use crate::config;
 use crate::github;
 use crate::omniroute::{self, ChatMessage};
@@ -43,6 +44,8 @@ pub fn tool_definitions() -> Value {
 pub(crate) async fn run(
     app_handle: &tauri::AppHandle,
     approvals: &PendingApprovals,
+    stops: &StopRequests,
+    stop_flag: Arc<SessionStop>,
     session: &Session,
     parent_call_id: &str,
     task: &str,
@@ -93,11 +96,40 @@ pub(crate) async fn run(
     }
     let tools_value = Value::Array(tool_list);
 
+    let graceful = session.graceful_stop;
+
     // Use the same loop detection as the main agent to catch infinite loops
     let mut loop_detector = LoopDetector::new(20, 5);
     let mut step_count: u64 = 0;
 
     loop {
+        if stop_flag.is_requested() {
+            if !graceful {
+                return Ok("Stopped: interrupted before completing the task".to_string());
+            }
+            if messages.iter().any(|m| m.role == "user") && messages.iter().any(|m| m.role == "assistant") {
+                let overview_prompt = "The parent agent's chat was stopped while you were working. \
+                    Write a concise overview of what you've done so far on this task and what remains, \
+                    so the work isn't lost when the chat is continued. Don't run any tools — just \
+                    summarize from the conversation above, in plain text.";
+                messages.push(ChatMessage {
+                    role: "user".into(),
+                    content: Some(overview_prompt.to_string()),
+                    ..Default::default()
+                });
+                let resp = omniroute::chat_completion(&cfg, agent::MODEL, &messages, None).await;
+                if let Ok(resp) = resp {
+                    if let Some(text) = resp.content {
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            return Ok(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+            return Ok("Stopped: interrupted before completing the task".to_string());
+        }
+
         step_count += 1;
 
         let assistant_msg =
@@ -128,6 +160,8 @@ pub(crate) async fn run(
             let tool_msg = agent::handle_tool_call(
                 app_handle,
                 approvals,
+                stops,
+                stop_flag.clone(),
                 session,
                 &session.id,
                 call,
@@ -137,6 +171,10 @@ pub(crate) async fn run(
 
             call_signatures.push((call.function.name.clone(), call.function.arguments.clone()));
             messages.push(tool_msg);
+
+            if stop_flag.is_requested() {
+                break;
+            }
         }
 
         // One signature per turn (reasoning text + every call it made this

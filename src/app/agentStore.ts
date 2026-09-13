@@ -288,7 +288,7 @@ export function ensureAgentEventsStarted() {
   });
 
   listen<TurnEndEventPayload>("agent://turn-end", async (evt) => {
-    const { session_id, error } = evt.payload;
+    const { session_id, error, reason } = evt.payload;
     // Refresh the persisted record first, then clear the live buffer in
     // the same patch — so a subscribed view swaps from "live" to
     // "history" atomically and never flashes an empty gap in between.
@@ -302,6 +302,8 @@ export function ensureAgentEventsStarted() {
     const rec = getRecord(session_id);
     const timeline: TimelineItem[] = error
       ? [{ kind: "message", key: nextKey("err"), role: "system", content: `Error: ${error}`, streaming: false }]
+      : !error && reason === "stopped"
+      ? [{ kind: "message", key: nextKey("stop"), role: "system", content: "Turn stopped — progress up to this point is saved. Send a follow-up to continue.", streaming: false }]
       : [];
     patch(session_id, {
       session: session ?? rec.session,

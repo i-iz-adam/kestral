@@ -121,11 +121,13 @@ fn create_session(
     mode: String,
     planning_enabled: Option<bool>,
     subagents_enabled: Option<bool>,
+    graceful_stop: Option<bool>,
     workspace: Option<String>,
 ) -> Result<sessions::Session, String> {
     let defaults = config::get_session_defaults_or_default(&app_handle);
     let planning_enabled = planning_enabled.unwrap_or(defaults.planning_enabled);
     let subagents_enabled = subagents_enabled.unwrap_or(defaults.subagents_enabled);
+    let graceful_stop = graceful_stop.unwrap_or(defaults.graceful_stop);
 
     // The picker in the sidebar always sends a workspace now; the fallback
     // chain here only matters for a stale frontend build or a very first
@@ -141,6 +143,7 @@ fn create_session(
         workspace,
         planning_enabled,
         subagents_enabled,
+        graceful_stop,
     ))
 }
 
@@ -169,6 +172,15 @@ fn set_session_subagents(
     enabled: bool,
 ) -> Result<(), String> {
     sessions::set_subagents_enabled(&app_handle, &id, enabled)
+}
+
+#[tauri::command]
+fn set_session_graceful_stop(
+    app_handle: tauri::AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    sessions::set_graceful_stop(&app_handle, &id, enabled)
 }
 
 #[tauri::command]
@@ -208,10 +220,28 @@ fn delete_session(app_handle: tauri::AppHandle, id: String) {
 async fn send_message(
     app_handle: tauri::AppHandle,
     approvals: tauri::State<'_, agent::PendingApprovals>,
+    stops: tauri::State<'_, agent::StopRequests>,
     session_id: String,
     message: String,
 ) -> Result<(), String> {
-    agent::run_turn(app_handle, approvals, session_id, message).await
+    agent::run_turn(app_handle, approvals, stops, session_id, message).await
+}
+
+#[tauri::command]
+async fn stop_session(
+    app_handle: tauri::AppHandle,
+    approvals: tauri::State<'_, agent::PendingApprovals>,
+    stops: tauri::State<'_, agent::StopRequests>,
+    session_id: String,
+) -> Result<(), String> {
+    // Interrupt the running turn the same way the /auto slash command
+    // clears pending approvals: resolve everything waiting so no loop is
+    // stuck, then mark the session stop-requested so the loop's next
+    // step boundary (and every live sub-agent's own loop) winds down and
+    // hands back whatever it already got through.
+    agent::approve_all_pending(&approvals, &session_id, false);
+    stops.request(&session_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -418,6 +448,7 @@ fn save_engine_config(
 fn main() {
     tauri::Builder::default()
         .manage(agent::PendingApprovals::default())
+        .manage(agent::StopRequests::default())
         .manage(engine::EngineState::default())
         .setup(|app| {
             let app_handle = app.handle();
@@ -446,9 +477,11 @@ fn main() {
             set_session_workspace,
             set_session_title,
             set_session_subagents,
+            set_session_graceful_stop,
             set_session_planning,
             approve_all_pending,
             send_message,
+            stop_session,
             approve_tool_call,
             save_github_token,
             get_github_token,

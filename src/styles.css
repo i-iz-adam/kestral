@@ -1423,6 +1423,9 @@ button:not(:disabled):hover {
 }
 
 .composer button.primary {
+  position: relative;
+  overflow: hidden;
+  min-width: 92px;
   background: linear-gradient(135deg, var(--accent), #7a4fe0);
   border: none;
   color: #fff;
@@ -1430,6 +1433,47 @@ button:not(:disabled):hover {
   padding: 0 18px;
   border-radius: 8px;
   cursor: pointer;
+}
+
+.send-btn .face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  transition: opacity 0.2s var(--ease), transform 0.3s var(--ease);
+}
+
+.send-btn .face-send {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.send-btn.sending .face-send {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.send-btn .face-stop {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.send-btn.sending .face-stop {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.send-btn .square {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+  border-radius: 2px;
+}
+
+.composer button.primary.sending {
+  background: linear-gradient(135deg, #e0544a, #b23a34);
 }
 
 @keyframes spring-press {
@@ -1452,7 +1496,7 @@ button:not(:disabled):hover {
   cursor: not-allowed;
 }
 
-.composer button.primary.sending {
+/* .composer button.primary.sending {
   position: relative;
   padding-right: 30px;
 }
@@ -1469,7 +1513,7 @@ button:not(:disabled):hover {
   border: 1.5px solid rgba(11, 12, 16, 0.35);
   border-top-color: var(--bg);
   animation: spin 0.7s linear infinite;
-}
+}*/
 
 /* ---- settings / github ---- */
 
