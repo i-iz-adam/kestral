@@ -173,6 +173,85 @@ struct TurnEndEvent<'a> {
     error: Option<&'a str>,
 }
 
+#[derive(Clone, Serialize)]
+struct SessionTitleUpdatedEvent<'a> {
+    session_id: &'a str,
+    title: &'a str,
+}
+
+fn is_default_title(title: &str) -> bool {
+    let t = title.trim();
+    t.is_empty() || t == "New coding session" || t == "New chat"
+}
+
+fn clean_title(raw: &str) -> String {
+    let mut s = raw.trim();
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        s = s[1..s.len() - 1].trim();
+    }
+    if s.to_lowercase().starts_with("title:") {
+        s = s[6..].trim();
+    }
+    s = s.trim_end_matches('.');
+
+    let mut result = s.to_string();
+    if result.len() > 60 {
+        result.truncate(60);
+        if let Some(pos) = result.rfind(' ') {
+            result.truncate(pos);
+        }
+    }
+
+    result.trim().to_string()
+}
+
+pub(crate) async fn maybe_auto_generate_title(
+    app_handle: &tauri::AppHandle,
+    cfg: &config::OmniRouteConfig,
+    session: &mut Session,
+    user_message: &str,
+) {
+    if !is_default_title(&session.title) {
+        return;
+    }
+
+    let system_msg = ChatMessage {
+        role: "system".into(),
+        content: Some(
+            "You generate short, concise, descriptive session titles for a coding/chat app. \
+             Generate a brief title (3 to 6 words maximum) summarizing the user's request. \
+             Do NOT wrap in quotes. Do NOT add prefixes like 'Title:'. Respond ONLY with the title text."
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+
+    let user_msg = ChatMessage {
+        role: "user".into(),
+        content: Some(user_message.to_string()),
+        ..Default::default()
+    };
+
+    let messages = vec![system_msg, user_msg];
+
+    if let Ok(resp) = omniroute::chat_completion(cfg, "auto/fast", &messages, None).await {
+        if let Some(content) = resp.content {
+            let cleaned = clean_title(&content);
+            if !cleaned.is_empty() {
+                session.title = cleaned;
+                sessions::save(app_handle, session);
+                let _ = app_handle.emit_all(
+                    "agent://session-title-updated",
+                    SessionTitleUpdatedEvent {
+                        session_id: &session.id,
+                        title: &session.title,
+                    },
+                );
+            }
+        }
+    }
+}
+
 pub(crate) const MODEL: &str = "auto/coding";
 
 pub(crate) fn is_mutating(name: &str) -> bool {
@@ -348,6 +427,8 @@ async fn run_turn_inner(
 
     let mut session =
         sessions::load(app_handle, session_id).ok_or("Session not found")?;
+
+    maybe_auto_generate_title(app_handle, &cfg, &mut session, &user_message).await;
 
     session.messages.push(ChatMessage {
         role: "user".into(),
