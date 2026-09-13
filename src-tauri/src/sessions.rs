@@ -79,6 +79,13 @@ pub fn set_linked_repo(app_handle: &tauri::AppHandle, id: &str, repo: Option<Str
     Ok(())
 }
 
+pub fn set_workspace(app_handle: &tauri::AppHandle, id: &str, workspace: String) -> Result<(), String> {
+    let mut session = load(app_handle, id).ok_or("Session not found")?;
+    session.workspace = workspace;
+    save(app_handle, &session);
+    Ok(())
+}
+
 pub fn set_subagents_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.subagents_enabled = enabled;

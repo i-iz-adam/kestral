@@ -59,6 +59,82 @@ pub fn load_workspace_path(app_handle: &tauri::AppHandle) -> Option<String> {
     parsed.get("path")?.as_str().map(|s| s.to_string())
 }
 
+/// A folder the agent can work from. Sessions each pick one at creation
+/// time (and can switch later) instead of the whole app being pinned to
+/// a single directory chosen once during setup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
+
+fn workspaces_path(app_handle: &tauri::AppHandle) -> PathBuf {
+    app_config_dir(app_handle).join("workspaces.json")
+}
+
+fn folder_name(path: &str) -> String {
+    PathBuf::from(path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+fn write_workspaces(app_handle: &tauri::AppHandle, list: &[Workspace]) -> std::io::Result<()> {
+    let data = serde_json::to_string_pretty(list)?;
+    fs::write(workspaces_path(app_handle), data)
+}
+
+/// All known workspaces, oldest first. The very first time this runs for
+/// an install that already went through the old single-folder setup step,
+/// it transparently migrates that one path into a one-entry list and
+/// persists it — nothing for existing users to redo.
+pub fn list_workspaces(app_handle: &tauri::AppHandle) -> Vec<Workspace> {
+    if let Ok(data) = fs::read_to_string(workspaces_path(app_handle)) {
+        if let Ok(list) = serde_json::from_str::<Vec<Workspace>>(&data) {
+            return list;
+        }
+    }
+    if let Some(path) = load_workspace_path(app_handle) {
+        let migrated = vec![Workspace {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: folder_name(&path),
+            path,
+        }];
+        let _ = write_workspaces(app_handle, &migrated);
+        return migrated;
+    }
+    vec![]
+}
+
+/// Adds a folder to the list (or returns the existing entry unchanged if
+/// that exact path is already known, so re-browsing to the same folder
+/// from two different sessions doesn't create duplicate entries).
+pub fn add_workspace(
+    app_handle: &tauri::AppHandle,
+    name: Option<String>,
+    path: String,
+) -> Result<Workspace, String> {
+    let mut list = list_workspaces(app_handle);
+    if let Some(existing) = list.iter().find(|w| w.path == path) {
+        return Ok(existing.clone());
+    }
+    let workspace = Workspace {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| folder_name(&path)),
+        path,
+    };
+    list.push(workspace.clone());
+    write_workspaces(app_handle, &list).map_err(|e| e.to_string())?;
+    Ok(workspace)
+}
+
+pub fn remove_workspace(app_handle: &tauri::AppHandle, id: &str) -> Result<(), String> {
+    let mut list = list_workspaces(app_handle);
+    list.retain(|w| w.id != id);
+    write_workspaces(app_handle, &list).map_err(|e| e.to_string())
+}
+
 /// How the app launches OmniRoute as a managed child process. The default
 /// (`npx -y omniroute`) is a fallback/override path — once a local install
 /// exists (see engine::install), `use_local_install` makes the app prefer

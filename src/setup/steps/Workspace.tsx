@@ -13,7 +13,7 @@ export default function Workspace({ onComplete }: StepProps) {
 
   const save = async () => {
     if (!path) return;
-    await invoke("save_workspace_path", { path });
+    await invoke("add_workspace", { name: null, path });
     onComplete();
   };
 

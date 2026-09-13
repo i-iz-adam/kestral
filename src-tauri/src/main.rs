@@ -50,6 +50,25 @@ fn get_workspace_path(app_handle: tauri::AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
+fn list_workspaces(app_handle: tauri::AppHandle) -> Vec<config::Workspace> {
+    config::list_workspaces(&app_handle)
+}
+
+#[tauri::command]
+fn add_workspace(
+    app_handle: tauri::AppHandle,
+    name: Option<String>,
+    path: String,
+) -> Result<config::Workspace, String> {
+    config::add_workspace(&app_handle, name, path)
+}
+
+#[tauri::command]
+fn remove_workspace(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+    config::remove_workspace(&app_handle, &id)
+}
+
+#[tauri::command]
 async fn test_omniroute_connection(config: config::OmniRouteConfig) -> Result<bool, String> {
     let base = match config.mode.as_str() {
         "local" => "http://127.0.0.1:20128".to_string(),
@@ -87,9 +106,15 @@ fn create_session(
     planning_enabled: bool,
     repo: Option<String>,
     subagents_enabled: bool,
+    workspace: Option<String>,
 ) -> Result<sessions::Session, String> {
-    let workspace =
-        config::load_workspace_path(&app_handle).ok_or("No workspace configured yet")?;
+    // The picker in the sidebar always sends a workspace now; the fallback
+    // chain here only matters for a stale frontend build or a very first
+    // session created before any workspace has explicitly been chosen.
+    let workspace = workspace
+        .or_else(|| config::list_workspaces(&app_handle).first().map(|w| w.path.clone()))
+        .or_else(|| config::load_workspace_path(&app_handle))
+        .ok_or("No workspace configured yet")?;
     Ok(sessions::create(
         &app_handle,
         title,
@@ -108,6 +133,15 @@ fn set_session_repo(
     repo: Option<String>,
 ) -> Result<(), String> {
     sessions::set_linked_repo(&app_handle, &id, repo)
+}
+
+#[tauri::command]
+fn set_session_workspace(
+    app_handle: tauri::AppHandle,
+    id: String,
+    workspace: String,
+) -> Result<(), String> {
+    sessions::set_workspace(&app_handle, &id, workspace)
 }
 
 #[tauri::command]
@@ -308,12 +342,16 @@ fn main() {
             get_omniroute_config,
             save_workspace_path,
             get_workspace_path,
+            list_workspaces,
+            add_workspace,
+            remove_workspace,
             test_omniroute_connection,
             create_session,
             list_sessions,
             get_session,
             delete_session,
             set_session_repo,
+            set_session_workspace,
             set_session_subagents,
             set_session_planning,
             approve_all_pending,

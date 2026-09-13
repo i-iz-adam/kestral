@@ -24,6 +24,12 @@ export interface Session {
   created_at: number;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  path: string;
+}
+
 export interface ToolCallEventPayload {
   session_id: string;
   call_id: string;

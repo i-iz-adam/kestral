@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { open } from "@tauri-apps/api/dialog";
-import type { OmniRouteConfigPayload } from "../types";
+import type { OmniRouteConfigPayload, Workspace } from "../types";
 
 export default function Settings() {
   const [mode, setMode] = useState<"local" | "remote">("local");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [workspace, setWorkspace] = useState<string | null>(null);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [status, setStatus] = useState<"idle" | "testing" | "ok" | "fail">(
     "idle"
   );
@@ -27,7 +27,7 @@ export default function Settings() {
         }
       }
     );
-    invoke<string | null>("get_workspace_path").then(setWorkspace);
+    invoke<Workspace[]>("list_workspaces").then(setWorkspaces);
     invoke<{ command: string; args: string[]; auto_start: boolean }>(
       "get_engine_config"
     ).then((cfg) => {
@@ -61,12 +61,21 @@ export default function Settings() {
     setTimeout(() => setSaved(false), 1500);
   };
 
-  const pickWorkspace = async () => {
+  const addWorkspace = async () => {
     const selected = await open({ directory: true, multiple: false });
-    if (typeof selected === "string") {
-      setWorkspace(selected);
-      await invoke("save_workspace_path", { path: selected });
-    }
+    if (typeof selected !== "string") return;
+    const workspace = await invoke<Workspace>("add_workspace", {
+      name: null,
+      path: selected,
+    });
+    setWorkspaces((list) =>
+      list.some((w) => w.id === workspace.id) ? list : [...list, workspace]
+    );
+  };
+
+  const removeWorkspace = async (id: string) => {
+    await invoke("remove_workspace", { id });
+    setWorkspaces((list) => list.filter((w) => w.id !== id));
   };
 
   const saveEngine = async () => {
@@ -163,9 +172,31 @@ export default function Settings() {
       )}
 
       <section>
-        <h3>Workspace</h3>
-        <p className="hint">{workspace ?? "None set"}</p>
-        <button onClick={pickWorkspace}>Change folder</button>
+        <h3>Workspaces</h3>
+        <p className="hint small">
+          Folders the agent can work from. Each session picks one when it's
+          created and can switch later — add as many projects here as you
+          like.
+        </p>
+        <div className="workspace-list">
+          {workspaces.map((w) => (
+            <div className="workspace-list-item" key={w.id}>
+              <div>
+                <span className="workspace-list-name">{w.name}</span>
+                <span className="hint small">{w.path}</span>
+              </div>
+              <button onClick={() => removeWorkspace(w.id)} title="Remove">
+                Remove
+              </button>
+            </div>
+          ))}
+          {workspaces.length === 0 && (
+            <p className="hint small">No workspaces yet.</p>
+          )}
+        </div>
+        <button onClick={addWorkspace} style={{ marginTop: 10 }}>
+          Add folder
+        </button>
       </section>
     </div>
   );
