@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import SessionView from "./SessionView";
 import Settings from "./Settings";
@@ -7,6 +7,7 @@ import SkillsPanel from "./SkillsPanel";
 import About from "./About";
 import ProvidersPanel from "./ProvidersPanel";
 import AmbientMotes from "./AmbientMotes";
+import { setActiveSession } from "./agentStore";
 
 type View =
   | { kind: "session"; id: string }
@@ -20,6 +21,13 @@ type View =
 export default function AppShell() {
   const [view, setView] = useState<View>({ kind: "empty" });
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // The store needs to know which session (if any) is on screen purely to
+  // decide whether a background turn finishing counts as "unseen" — this
+  // is the only thing that ties AppShell to agentStore.
+  useEffect(() => {
+    setActiveSession(view.kind === "session" ? view.id : null);
+  }, [view]);
 
   // Keying the transition wrapper on the view identity (not just "session"
   // vs "settings") is what makes switching between two different sessions

@@ -30,10 +30,16 @@ export interface SessionRecord {
   timeline: TimelineItem[];
   liveCalls: ToolCallEventPayload[];
   sending: boolean;
+  /** True once a turn finishes for this session while it wasn't the one
+   * on screen — cleared by setActiveSession the moment the person opens
+   * it. Drives the sidebar's "something happened while you were away"
+   * glow, distinct from `sending` (which is about right now, not what
+   * was missed). */
+  unseenActivity: boolean;
 }
 
 function emptyRecord(): SessionRecord {
-  return { session: null, timeline: [], liveCalls: [], sending: false };
+  return { session: null, timeline: [], liveCalls: [], sending: false, unseenActivity: false };
 }
 
 // Stable snapshot for unknown sessions. useSyncExternalStore requires
@@ -89,6 +95,19 @@ export function subscribeAny(cb: () => void): () => void {
 
 function notifyAny() {
   subscribers.get("*")?.forEach((cb) => cb());
+}
+
+/** Which session (if any) is currently the one on screen — set by
+ * AppShell on every navigation. Used only to decide whether a completed
+ * turn counts as "unseen" for the sidebar glow; it's deliberately not
+ * part of any component's render state. */
+let activeSessionId: string | null = null;
+
+export function setActiveSession(sessionId: string | null) {
+  activeSessionId = sessionId;
+  if (sessionId && getRecord(sessionId).unseenActivity) {
+    patch(sessionId, { unseenActivity: false });
+  }
 }
 
 /** Fetches (or refetches) a session's persisted record from disk. Called
@@ -247,6 +266,7 @@ export function ensureAgentEventsStarted() {
       timeline,
       liveCalls: [],
       sending: false,
+      unseenActivity: session_id !== activeSessionId,
     });
     notifyAny();
   });

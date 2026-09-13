@@ -24,6 +24,10 @@
   --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.5);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-breathe: cubic-bezier(0.45, 0.05, 0.55, 0.95);
+  /* Overshoots slightly past its target before settling — used wherever
+     something should feel like it's reacting to force (a click landing, a
+     tool call completing) rather than just interpolating to a value. */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
 }
 
@@ -256,6 +260,49 @@ button:not(:disabled):hover {
   font-size: 14px;
 }
 
+.field-group.compact {
+  margin-bottom: 0;
+  gap: 4px;
+}
+
+.field-group.compact label {
+  margin-top: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.workspace-picker {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.workspace-picker:hover {
+  border-color: var(--border-soft);
+}
+
+.workspace-picker:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+/* Compact variant used inline in the session header, next to the other
+   rune badges rather than stacked in a field-group. */
+.workspace-picker.inline {
+  width: auto;
+  max-width: 220px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
 .hint {
   font-size: 13px;
   color: var(--text-dim);
@@ -400,6 +447,15 @@ button:not(:disabled):hover {
   gap: 4px;
 }
 
+/* Plays once, at mount — a session item only mounts once (stable key per
+   id), so this fires exactly when a new session actually appears in the
+   list, not on every re-render or reorder. */
+@keyframes session-spring-in {
+  0% { opacity: 0; transform: scale(0.9) translateY(-6px); }
+  60% { opacity: 1; transform: scale(1.02) translateY(0); }
+  100% { transform: scale(1) translateY(0); }
+}
+
 .session-item {
   display: flex;
   justify-content: space-between;
@@ -413,6 +469,7 @@ button:not(:disabled):hover {
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
+  animation: session-spring-in 0.4s var(--ease-spring) both;
   transition: background-color 0.15s var(--ease), transform 0.15s var(--ease),
     border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
@@ -442,6 +499,29 @@ button:not(:disabled):hover {
   background: var(--surface-2);
   border-left-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--border), -1px 0 10px -3px var(--accent-glow);
+}
+
+/* A session that finished a turn while you were elsewhere gets a
+   traveling light along its spine instead of a static badge — something
+   visibly *happened* there, not just "has a status." Settles back to the
+   plain spine the moment it's opened (setActiveSession clears the flag). */
+@keyframes spine-wait {
+  0%, 100% { box-shadow: inset 2px 0 0 0 var(--gold); }
+  50% { box-shadow: inset 2px 0 0 0 var(--gold), -2px 0 14px -4px var(--gold-glow); }
+}
+
+.session-item.has-activity {
+  border-left-color: var(--gold);
+  animation: spine-wait 1.8s var(--ease-breathe) infinite;
+}
+
+.session-ready-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 6px 1px var(--gold-glow);
+  margin-left: 8px;
 }
 
 .session-title {
@@ -711,6 +791,30 @@ button:not(:disabled):hover {
 .markdown > *:first-child { margin-top: 0; }
 .markdown > *:last-child { margin-bottom: 0; }
 
+/* A practical stand-in for "word-by-word" reveal: animating literally
+   every word against a markdown block that gets fully re-parsed on every
+   streaming delta would mean re-triggering (and re-computing) an
+   animation on every keystroke-sized chunk — janky and wasteful. Instead
+   this only ever applies to `.message:not(.streaming)` — i.e. the exact
+   moment a reply finishes and its content is set one last time — so each
+   paragraph/list/code-block cascades in top to bottom like a page
+   settling into place, without touching anything while it's still live. */
+@keyframes block-settle {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message:not(.streaming) .markdown > * {
+  animation: block-settle 0.34s var(--ease) both;
+}
+
+.message:not(.streaming) .markdown > *:nth-child(1) { animation-delay: 0s; }
+.message:not(.streaming) .markdown > *:nth-child(2) { animation-delay: 0.05s; }
+.message:not(.streaming) .markdown > *:nth-child(3) { animation-delay: 0.1s; }
+.message:not(.streaming) .markdown > *:nth-child(4) { animation-delay: 0.15s; }
+.message:not(.streaming) .markdown > *:nth-child(5) { animation-delay: 0.2s; }
+.message:not(.streaming) .markdown > *:nth-child(n+6) { animation-delay: 0.24s; }
+
 .markdown p {
   margin: 0 0 0.6em;
   white-space: pre-wrap;
@@ -903,6 +1007,7 @@ button:not(:disabled):hover {
 }
 
 .tool-row {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -937,18 +1042,55 @@ button:not(:disabled):hover {
   animation: rune-cast 1.7s var(--ease-breathe) infinite;
 }
 
-/* On completion, one brief golden flare — the spell "landing" — then it
-   settles back to the plain resting state. animation-fill-mode: both
-   keeps it from flashing again if the component re-renders with the
-   same "done" class already applied. */
+/* The spark burst fires exactly once, the instant a tool call actually
+   starts (see ToolCallRow's mount-time check) — a handful of motes
+   scattering from the row's left edge, rather than a decorative loop.
+   Four box-shadow "sparks" travel outward and fade in one pass. */
+@keyframes spark-burst {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(155, 107, 255, 0.9),
+      0 0 0 0 rgba(224, 180, 92, 0.9),
+      0 0 0 0 rgba(155, 107, 255, 0.9),
+      0 0 0 0 rgba(224, 180, 92, 0.85);
+    opacity: 1;
+  }
+  100% {
+    box-shadow:
+      -20px -12px 0 0 rgba(155, 107, 255, 0),
+      18px -16px 0 0 rgba(224, 180, 92, 0),
+      -16px 14px 0 0 rgba(155, 107, 255, 0),
+      20px 12px 0 0 rgba(224, 180, 92, 0);
+    opacity: 0;
+  }
+}
+
+.tool-row.ignite::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: spark-burst 0.55s ease-out both;
+}
+
+/* On completion, one brief golden flare — the spell "landing" — with a
+   slight spring overshoot on scale so it reads as impact settling rather
+   than a flat fade. animation-fill-mode: both keeps it from flashing
+   again if the component re-renders with the same "done" class already
+   applied. */
 @keyframes rune-flare {
-  0% { box-shadow: 0 0 0 0 var(--gold-glow), var(--shadow-sm); }
-  35% { box-shadow: 0 0 20px 1px var(--gold-glow), var(--shadow-sm); border-color: rgba(224, 180, 92, 0.5); }
-  100% { box-shadow: 0 0 0 0 rgba(224, 180, 92, 0), var(--shadow-sm); }
+  0% { box-shadow: 0 0 0 0 var(--gold-glow), var(--shadow-sm); transform: scale(1); }
+  35% { box-shadow: 0 0 20px 1px var(--gold-glow), var(--shadow-sm); border-color: rgba(224, 180, 92, 0.5); transform: scale(1.015); }
+  65% { transform: scale(0.997); }
+  100% { box-shadow: 0 0 0 0 rgba(224, 180, 92, 0), var(--shadow-sm); transform: scale(1); }
 }
 
 .tool-row.done {
-  animation: rune-flare 0.7s var(--ease) both;
+  animation: rune-flare 0.6s var(--ease-spring) both;
 }
 
 .tool-name {
@@ -1290,6 +1432,17 @@ button:not(:disabled):hover {
   cursor: pointer;
 }
 
+@keyframes spring-press {
+  0% { transform: scale(1); }
+  35% { transform: scale(0.9); }
+  70% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
+.composer button.primary.sent {
+  animation: spring-press 0.4s var(--ease-spring);
+}
+
 .composer button.primary:hover:not(:disabled) {
   filter: brightness(1.08);
 }
@@ -1372,6 +1525,49 @@ button:not(:disabled):hover {
   border-color: var(--accent);
   color: var(--bg);
   font-weight: 500;
+}
+
+.workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.workspace-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.workspace-list-item > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.workspace-list-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.workspace-list-item .hint.small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-list-item button {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 12px;
 }
 
 .issue-list {

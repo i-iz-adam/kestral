@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { ToolCallEventPayload } from "../types";
 
 /// A short, tool-specific summary of the call's arguments shown inline
@@ -46,8 +47,22 @@ export default function ToolCallRow({
   onApprove: (callId: string, approved: boolean) => void;
 }) {
   const argSummary = summarizeArgs(event.name, event.args);
+
+  // This component mounts exactly once per call_id, right as the real
+  // "start" event arrives (see the stable key in SessionView) — so
+  // checking status at mount time, once, is enough to know "this row is
+  // igniting because a tool call actually just began" rather than
+  // replaying the burst on every subsequent status update.
+  const [igniting, setIgniting] = useState(() => event.status === "start");
+  useEffect(() => {
+    if (!igniting) return;
+    const t = setTimeout(() => setIgniting(false), 550);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className={"tool-row " + event.status}>
+    <div className={"tool-row " + event.status + (igniting ? " ignite" : "")}>
       <span className="tool-name">{event.name}</span>
       {argSummary && <span className="tool-arg">{argSummary}</span>}
       <span className="tool-status">{event.status}</span>
