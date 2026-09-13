@@ -25,7 +25,8 @@ pub fn step_registry() -> Vec<SetupStepDef> {
         SetupStepDef { id: "welcome".into(), order: 0 },
         SetupStepDef { id: "omniroute".into(), order: 1 },
         SetupStepDef { id: "workspace".into(), order: 2 },
-        SetupStepDef { id: "finish".into(), order: 3 },
+        SetupStepDef { id: "defaults".into(), order: 3 },
+        SetupStepDef { id: "finish".into(), order: 4 },
     ]
 }
 
@@ -65,6 +66,13 @@ pub fn pending_steps(app_handle: &tauri::AppHandle) -> Vec<SetupStepDef> {
     let mut steps: Vec<SetupStepDef> = step_registry()
         .into_iter()
         .filter(|s| !state.completed_steps.contains(&s.id))
+        .filter(|s| {
+            if s.id == "defaults" && crate::config::load_session_defaults(app_handle).is_some() {
+                false
+            } else {
+                true
+            }
+        })
         .collect();
     steps.sort_by_key(|s| s.order);
     steps

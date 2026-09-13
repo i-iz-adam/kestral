@@ -2,6 +2,41 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionDefaults {
+    pub planning_enabled: bool,
+    pub subagents_enabled: bool,
+}
+
+impl Default for SessionDefaults {
+    fn default() -> Self {
+        Self {
+            planning_enabled: true,
+            subagents_enabled: true,
+        }
+    }
+}
+
+pub fn save_session_defaults(
+    app_handle: &tauri::AppHandle,
+    defaults: &SessionDefaults,
+) -> std::io::Result<()> {
+    let path = app_config_dir(app_handle).join("session_defaults.json");
+    let data = serde_json::to_string_pretty(defaults)?;
+    fs::write(path, data)
+}
+
+pub fn load_session_defaults(app_handle: &tauri::AppHandle) -> Option<SessionDefaults> {
+    let path = app_config_dir(app_handle).join("session_defaults.json");
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+}
+
+pub fn get_session_defaults_or_default(app_handle: &tauri::AppHandle) -> SessionDefaults {
+    load_session_defaults(app_handle).unwrap_or_default()
+}
+
 /// How this install talks to OmniRoute for LLM calls.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OmniRouteConfig {

@@ -40,6 +40,21 @@ fn get_omniroute_config(app_handle: tauri::AppHandle) -> Option<config::OmniRout
 }
 
 #[tauri::command]
+fn get_session_defaults(app_handle: tauri::AppHandle) -> config::SessionDefaults {
+    config::get_session_defaults_or_default(&app_handle)
+}
+
+#[tauri::command]
+fn save_session_defaults(
+    app_handle: tauri::AppHandle,
+    defaults: config::SessionDefaults,
+) -> Result<(), String> {
+    config::save_session_defaults(&app_handle, &defaults).map_err(|e| e.to_string())?;
+    setup::mark_complete(&app_handle, "defaults");
+    Ok(())
+}
+
+#[tauri::command]
 fn save_workspace_path(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
     config::save_workspace_path(&app_handle, &path).map_err(|e| e.to_string())
 }
@@ -103,10 +118,14 @@ fn create_session(
     app_handle: tauri::AppHandle,
     title: String,
     mode: String,
-    planning_enabled: bool,
-    subagents_enabled: bool,
+    planning_enabled: Option<bool>,
+    subagents_enabled: Option<bool>,
     workspace: Option<String>,
 ) -> Result<sessions::Session, String> {
+    let defaults = config::get_session_defaults_or_default(&app_handle);
+    let planning_enabled = planning_enabled.unwrap_or(defaults.planning_enabled);
+    let subagents_enabled = subagents_enabled.unwrap_or(defaults.subagents_enabled);
+
     // The picker in the sidebar always sends a workspace now; the fallback
     // chain here only matters for a stale frontend build or a very first
     // session created before any workspace has explicitly been chosen.
@@ -336,6 +355,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_pending_setup_steps,
             complete_setup_step,
+            get_session_defaults,
+            save_session_defaults,
             save_omniroute_config,
             get_omniroute_config,
             save_workspace_path,
