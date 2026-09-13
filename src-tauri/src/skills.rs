@@ -15,9 +15,9 @@ pub struct Skill {
 
 struct BuiltinSkill {
     id: &'static str,
-    name: &'static str,
-    description: &'static str,
-    content: &'static str,
+    name: String,
+    description: String,
+    content: String,
 }
 
 /// The skill library shipped with the app. Each is a small, focused
@@ -25,62 +25,47 @@ struct BuiltinSkill {
 /// conversation, just made discoverable via the list_skills/read_skill
 /// tools so the agent can pull one in only when it's actually relevant.
 fn builtin_skills() -> Vec<BuiltinSkill> {
-    vec![
-        BuiltinSkill {
-            id: "git-workflow",
-            name: "Git workflow",
-            description: "Branch naming, commit conventions, and what to check before opening a PR.",
-            content: include_str!("../skills_builtin/git-workflow.md"),
-        },
-        BuiltinSkill {
-            id: "debugging",
-            name: "Systematic debugging",
-            description: "A repeatable process for isolating and fixing a bug instead of guessing.",
-            content: include_str!("../skills_builtin/debugging.md"),
-        },
-        BuiltinSkill {
-            id: "testing",
-            name: "Writing and running tests",
-            description: "What's worth testing, the write-fail-fix loop, and how to find the right test command.",
-            content: include_str!("../skills_builtin/testing.md"),
-        },
-        BuiltinSkill {
-            id: "code-review",
-            name: "Self code review",
-            description: "A checklist to run over a diff before presenting it as done.",
-            content: include_str!("../skills_builtin/code-review.md"),
-        },
-        BuiltinSkill {
-            id: "refactoring",
-            name: "Safe refactoring",
-            description: "Restructuring code without changing behavior, in small reversible steps.",
-            content: include_str!("../skills_builtin/refactoring.md"),
-        },
-        BuiltinSkill {
-            id: "lang-python",
-            name: "Python",
-            description: "Tooling, idioms, and common gotchas.",
-            content: include_str!("../skills_builtin/lang-python.md"),
-        },
-        BuiltinSkill {
-            id: "lang-typescript",
-            name: "JavaScript / TypeScript",
-            description: "Tooling, idioms, and common gotchas.",
-            content: include_str!("../skills_builtin/lang-typescript.md"),
-        },
-        BuiltinSkill {
-            id: "lang-rust",
-            name: "Rust",
-            description: "Tooling, idioms, and common gotchas.",
-            content: include_str!("../skills_builtin/lang-rust.md"),
-        },
-        BuiltinSkill {
-            id: "lang-go",
-            name: "Go",
-            description: "Tooling, idioms, and common gotchas.",
-            content: include_str!("../skills_builtin/lang-go.md"),
-        },
-    ]
+    let raw_builtins = vec![
+        ("git-workflow", "Git workflow", "Branch naming, commit conventions, and what to check before opening a PR.", include_str!("../skills_builtin/git-workflow.md")),
+        ("debugging", "Systematic debugging", "A repeatable process for isolating and fixing a bug instead of guessing.", include_str!("../skills_builtin/debugging.md")),
+        ("testing", "Writing and running tests", "What's worth testing, the write-fail-fix loop, and how to find the right test command.", include_str!("../skills_builtin/testing.md")),
+        ("code-review", "Self code review", "A checklist to run over a diff before presenting it as done.", include_str!("../skills_builtin/code-review.md")),
+        ("refactoring", "Safe refactoring", "Restructuring code without changing behavior, in small reversible steps.", include_str!("../skills_builtin/refactoring.md")),
+        ("lang-python", "Python", "Tooling, idioms, and common gotchas.", include_str!("../skills_builtin/lang-python.md")),
+        ("lang-typescript", "JavaScript / TypeScript", "Tooling, idioms, and common gotchas.", include_str!("../skills_builtin/lang-typescript.md")),
+        ("lang-rust", "Rust", "Tooling, idioms, and common gotchas.", include_str!("../skills_builtin/lang-rust.md")),
+        ("lang-go", "Go", "Tooling, idioms, and common gotchas.", include_str!("../skills_builtin/lang-go.md")),
+        ("docx", "docx", "Word document creation, editing, and analysis.", include_str!("../skills_builtin/docx/SKILL.md")),
+        ("file-reading", "file-reading", "Reading and inspecting uploaded files.", include_str!("../skills_builtin/file-reading/SKILL.md")),
+        ("frontend-design", "frontend-design", "Distinctive, intentional visual design guidance.", include_str!("../skills_builtin/frontend-design/SKILL.md")),
+        ("pdf", "pdf", "PDF processing guide, creation, merging, and forms.", include_str!("../skills_builtin/pdf/SKILL.md")),
+        ("pdf-reading", "pdf-reading", "Reading and inspecting PDF files.", include_str!("../skills_builtin/pdf-reading/SKILL.md")),
+        ("pptx", "pptx", "PowerPoint creation, editing, and analysis.", include_str!("../skills_builtin/pptx/SKILL.md")),
+        ("xlsx", "xlsx", "Spreadsheet creation, editing, and analysis.", include_str!("../skills_builtin/xlsx/SKILL.md")),
+    ];
+
+    raw_builtins
+        .into_iter()
+        .map(|(id, default_name, default_desc, raw)| {
+            let (fm_name, fm_desc, body) = parse_frontmatter(raw);
+            let name = if !fm_name.is_empty() && fm_name != "Untitled skill" {
+                fm_name
+            } else {
+                default_name.to_string()
+            };
+            let description = if !fm_desc.is_empty() {
+                fm_desc
+            } else {
+                default_desc.to_string()
+            };
+            BuiltinSkill {
+                id,
+                name,
+                description,
+                content: body,
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,8 +122,8 @@ pub fn list(app_handle: &tauri::AppHandle) -> Vec<Skill> {
     for b in builtin_skills() {
         out.push(Skill {
             id: b.id.to_string(),
-            name: b.name.to_string(),
-            description: b.description.to_string(),
+            name: b.name.clone(),
+            description: b.description.clone(),
             source: "builtin".to_string(),
             enabled: !state.disabled.contains(&b.id.to_string()),
         });
@@ -146,15 +131,68 @@ pub fn list(app_handle: &tauri::AppHandle) -> Vec<Skill> {
 
     if let Ok(entries) = fs::read_dir(skills_dir(app_handle)) {
         for entry in entries.flatten() {
-            if let Ok(data) = fs::read_to_string(entry.path()) {
-                if let Ok(file) = serde_json::from_str::<InstalledSkillFile>(&data) {
-                    out.push(Skill {
-                        id: file.id.clone(),
-                        name: file.name,
-                        description: file.description,
-                        source: "installed".to_string(),
-                        enabled: !state.disabled.contains(&file.id),
-                    });
+            let path = entry.path();
+            if path.is_dir() {
+                let skill_md = path.join("SKILL.md");
+                if skill_md.is_file() {
+                    if let Ok(data) = fs::read_to_string(&skill_md) {
+                        let dir_name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown");
+                        let (name, description, _) = parse_frontmatter(&data);
+                        let name = if !name.is_empty() && name != "Untitled skill" {
+                            name
+                        } else {
+                            dir_name.to_string()
+                        };
+                        let id = dir_name.to_string();
+                        if !out.iter().any(|s| s.id == id) {
+                            out.push(Skill {
+                                id: id.clone(),
+                                name,
+                                description,
+                                source: "installed".to_string(),
+                                enabled: !state.disabled.contains(&id),
+                            });
+                        }
+                    }
+                }
+            } else if path.is_file() {
+                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if file_name.ends_with(".json") {
+                    if let Ok(data) = fs::read_to_string(&path) {
+                        if let Ok(file) = serde_json::from_str::<InstalledSkillFile>(&data) {
+                            if !out.iter().any(|s| s.id == file.id) {
+                                out.push(Skill {
+                                    id: file.id.clone(),
+                                    name: file.name,
+                                    description: file.description,
+                                    source: "installed".to_string(),
+                                    enabled: !state.disabled.contains(&file.id),
+                                });
+                            }
+                        }
+                    }
+                } else if file_name.ends_with(".md") {
+                    let id = file_name.trim_end_matches(".md").to_string();
+                    if let Ok(data) = fs::read_to_string(&path) {
+                        let (name, description, _) = parse_frontmatter(&data);
+                        let name = if !name.is_empty() && name != "Untitled skill" {
+                            name
+                        } else {
+                            id.clone()
+                        };
+                        if !out.iter().any(|s| s.id == id) {
+                            out.push(Skill {
+                                id: id.clone(),
+                                name,
+                                description,
+                                source: "installed".to_string(),
+                                enabled: !state.disabled.contains(&id),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -165,12 +203,34 @@ pub fn list(app_handle: &tauri::AppHandle) -> Vec<Skill> {
 
 pub fn get_content(app_handle: &tauri::AppHandle, id: &str) -> Option<String> {
     if let Some(b) = builtin_skills().into_iter().find(|b| b.id == id) {
-        return Some(b.content.to_string());
+        return Some(b.content);
     }
-    let path = skills_dir(app_handle).join(format!("{}.json", id));
-    let data = fs::read_to_string(path).ok()?;
-    let file: InstalledSkillFile = serde_json::from_str(&data).ok()?;
-    Some(file.content)
+    // Check directory with SKILL.md (folder-based installed skill)
+    let folder_skill = skills_dir(app_handle).join(id).join("SKILL.md");
+    if folder_skill.is_file() {
+        if let Ok(data) = fs::read_to_string(folder_skill) {
+            let (_, _, body) = parse_frontmatter(&data);
+            return Some(body);
+        }
+    }
+    // Check JSON file
+    let json_path = skills_dir(app_handle).join(format!("{}.json", id));
+    if json_path.is_file() {
+        if let Ok(data) = fs::read_to_string(json_path) {
+            if let Ok(file) = serde_json::from_str::<InstalledSkillFile>(&data) {
+                return Some(file.content);
+            }
+        }
+    }
+    // Check markdown file
+    let md_path = skills_dir(app_handle).join(format!("{}.md", id));
+    if md_path.is_file() {
+        if let Ok(data) = fs::read_to_string(md_path) {
+            let (_, _, body) = parse_frontmatter(&data);
+            return Some(body);
+        }
+    }
+    None
 }
 
 pub fn toggle(app_handle: &tauri::AppHandle, id: &str, enabled: bool) {
@@ -186,11 +246,32 @@ pub fn delete(app_handle: &tauri::AppHandle, id: &str) -> Result<(), String> {
     if builtin_skills().iter().any(|b| b.id == id) {
         return Err("Built-in skills can be disabled but not deleted".into());
     }
-    let path = skills_dir(app_handle).join(format!("{}.json", id));
-    fs::remove_file(path).map_err(|e| e.to_string())
+    let dir = skills_dir(app_handle).join(id);
+    if dir.is_dir() {
+        return fs::remove_dir_all(dir).map_err(|e| e.to_string());
+    }
+    let json_path = skills_dir(app_handle).join(format!("{}.json", id));
+    if json_path.is_file() {
+        return fs::remove_file(json_path).map_err(|e| e.to_string());
+    }
+    let md_path = skills_dir(app_handle).join(format!("{}.md", id));
+    if md_path.is_file() {
+        return fs::remove_file(md_path).map_err(|e| e.to_string());
+    }
+    Err(format!("Skill {} not found", id))
 }
 
-/// Minimal frontmatter parser for installed skills:
+fn unquote(s: &str) -> String {
+    let s = s.trim();
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        if s.len() >= 2 {
+            return s[1..s.len() - 1].to_string();
+        }
+    }
+    s.to_string()
+}
+
+/// Minimal frontmatter parser for skills:
 /// ---
 /// name: X
 /// description: Y
@@ -198,19 +279,24 @@ pub fn delete(app_handle: &tauri::AppHandle, id: &str) -> Result<(), String> {
 /// body...
 /// Anything without a recognizable frontmatter block is still installed,
 /// just with a generic name so it isn't silently dropped.
-fn parse_frontmatter(raw: &str) -> (String, String, String) {
-    if let Some(rest) = raw.strip_prefix("---\n") {
+pub fn parse_frontmatter(raw: &str) -> (String, String, String) {
+    let trimmed = raw.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("---") {
+        let rest = rest.trim_start_matches('\r').strip_prefix('\n').unwrap_or(rest);
         if let Some(end) = rest.find("\n---") {
             let fm = &rest[..end];
-            let body = rest[end + 4..].trim_start_matches('\n').to_string();
+            let body = rest[end + 4..]
+                .trim_start_matches(|c| c == '\r' || c == '\n')
+                .to_string();
             let mut name = String::new();
             let mut description = String::new();
             for line in fm.lines() {
+                let line = line.trim();
                 if let Some(v) = line.strip_prefix("name:") {
-                    name = v.trim().to_string();
+                    name = unquote(v);
                 }
                 if let Some(v) = line.strip_prefix("description:") {
-                    description = v.trim().to_string();
+                    description = unquote(v);
                 }
             }
             return (name, description, body);
@@ -321,6 +407,13 @@ fn skill_keywords(id: &str) -> &'static [&'static str] {
         "lang-typescript" => &["typescript", "javascript", "react", "vite", "npm", "node", "tsx", ".ts", ".tsx", ".js", ".jsx"],
         "lang-rust" => &["rust", "cargo", "tokio", ".rs"],
         "lang-go" => &["golang", "goroutine", "go.mod", ".go"],
+        "frontend-design" => &["frontend-design", "frontend design", "ui design", "visual design", "design lead", "aesthetic", "typography", "palette", "layout concept"],
+        "docx" => &["docx", "dotx", "word doc", "word document", ".docx", ".dotx"],
+        "file-reading" => &["file-reading", "file reading", "read file", "uploaded file", "uploaded_files", "extract-text", "/mnt/user-data/uploads/"],
+        "pdf" => &["pdf", ".pdf", "pypdf", "pdfplumber", "reportlab", "qpdf"],
+        "pdf-reading" => &["pdf-reading", "pdf reading", "read pdf", "scanned pdf", "pdftotext", "pdfinfo", "pdffonts"],
+        "pptx" => &["pptx", "potx", "powerpoint", "presentation", "slide deck", ".pptx", ".potx"],
+        "xlsx" => &["xlsx", "xlsm", "xls", "excel", "spreadsheet", "openpyxl", ".xlsx", ".xlsm"],
         _ => &[],
     }
 }
@@ -343,7 +436,7 @@ pub fn find_relevant(app_handle: &tauri::AppHandle, text: &str) -> Vec<Skill> {
         .into_iter()
         .filter(|b| {
             enabled.iter().any(|s| s.id == b.id && s.enabled)
-                && skill_keywords(b.id).iter().any(|kw| {
+                && skill_keywords(&b.id).iter().any(|kw| {
                     if kw.contains(' ') || kw.contains('.') {
                         lower.contains(kw)
                     } else {
@@ -359,4 +452,66 @@ pub fn find_relevant(app_handle: &tauri::AppHandle, text: &str) -> Vec<Skill> {
             enabled: true,
         })
         .collect()
+}
+
+/// Returns set of skill IDs that are already loaded in the session context.
+pub fn get_loaded_skill_ids(session: &crate::sessions::Session) -> std::collections::HashSet<String> {
+    let mut loaded = std::collections::HashSet::new();
+    for msg in &session.messages {
+        if msg.role == "skill-loaded" {
+            if let Some(content) = &msg.content {
+                if let Ok(val) = serde_json::from_str::<Value>(content) {
+                    if let Some(id) = val.get("args").and_then(|a| a.get("skill_id")).and_then(|v| v.as_str()) {
+                        loaded.insert(id.to_string());
+                    }
+                }
+            }
+        }
+        if msg.role == "assistant" {
+            if let Some(calls) = &msg.tool_calls {
+                for call in calls {
+                    if call.function.name == "read_skill" {
+                        if let Ok(args) = serde_json::from_str::<Value>(&call.function.arguments) {
+                            if let Some(id) = args.get("id").and_then(|v| v.as_str()) {
+                                loaded.insert(id.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    loaded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_frontmatter_standard() {
+        let raw = "---\nname: frontend-design\ndescription: Guidance for UI design\n---\n\n# Header\nContent here.";
+        let (name, desc, body) = parse_frontmatter(raw);
+        assert_eq!(name, "frontend-design");
+        assert_eq!(desc, "Guidance for UI design");
+        assert_eq!(body, "# Header\nContent here.");
+    }
+
+    #[test]
+    fn test_parse_frontmatter_quoted() {
+        let raw = "---\nname: \"my-skill\"\ndescription: 'Description of my skill'\n---\nBody text";
+        let (name, desc, body) = parse_frontmatter(raw);
+        assert_eq!(name, "my-skill");
+        assert_eq!(desc, "Description of my skill");
+        assert_eq!(body, "Body text");
+    }
+
+    #[test]
+    fn test_parse_frontmatter_no_block() {
+        let raw = "# Git workflow\nNo frontmatter here.";
+        let (name, desc, body) = parse_frontmatter(raw);
+        assert_eq!(name, "Untitled skill");
+        assert_eq!(desc, "");
+        assert_eq!(body, raw);
+    }
 }
