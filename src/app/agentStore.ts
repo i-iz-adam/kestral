@@ -54,6 +54,27 @@ const subscribers = new Map<string, Set<() => void>>();
 let keySeq = 0;
 const nextKey = (prefix: string) => `live-${prefix}-${++keySeq}`;
 
+/** The currently selected workspace filter — drives which sessions appear in
+ * the sidebar. When null, shows all sessions; when set, shows only sessions
+ * from that workspace. Separate from the workspace selected for new sessions. */
+let currentWorkspaceFilter: string | null = null;
+const workspaceSubscribers = new Set<() => void>();
+
+export function getCurrentWorkspaceFilter(): string | null {
+  return currentWorkspaceFilter;
+}
+
+export function setCurrentWorkspaceFilter(path: string | null) {
+  currentWorkspaceFilter = path;
+  workspaceSubscribers.forEach((cb) => cb());
+  notifyAny();
+}
+
+export function subscribeWorkspaceFilter(cb: () => void): () => void {
+  workspaceSubscribers.add(cb);
+  return () => workspaceSubscribers.delete(cb);
+}
+
 function notify(sessionId: string) {
   subscribers.get(sessionId)?.forEach((cb) => cb());
 }
@@ -84,6 +105,21 @@ export function isAnySessionSending(): boolean {
     if (rec.sending) return true;
   }
   return false;
+}
+
+/** Returns sessions from OTHER workspaces that are currently sending.
+ * Used to show "busy" sessions at the top of the sidebar even when
+ * filtered to a different workspace. */
+export function getSendingSessionsOutsideWorkspace(workspace: string | null): SessionRecord[] {
+  const results: SessionRecord[] = [];
+  for (const [, rec] of records) {
+    if (!rec.sending) continue;
+    const sessionWorkspace = rec.session?.workspace ?? null;
+    if (sessionWorkspace !== workspace) {
+      results.push(rec);
+    }
+  }
+  return results;
 }
 
 export function subscribeAny(cb: () => void): () => void {

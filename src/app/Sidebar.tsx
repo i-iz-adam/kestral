@@ -1,10 +1,16 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
-import type { Session } from "../types";
+import type { Session, Workspace } from "../types";
 import EngineStatusBadge from "./EngineStatusBadge";
 import WorkspacePicker from "./WorkspacePicker";
 import { useAgentSession } from "./useAgentSession";
-import { subscribeAny } from "./agentStore";
+import {
+  subscribeAny,
+  getCurrentWorkspaceFilter,
+  setCurrentWorkspaceFilter,
+  subscribeWorkspaceFilter,
+  getSendingSessionsOutsideWorkspace,
+} from "./agentStore";
 
 type Mode = "coding" | "general";
 
@@ -32,18 +38,67 @@ export default function Sidebar({
   refreshKey,
 }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [mode, setMode] = useState<Mode>("coding");
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+  const [currentWorkspaceFilter, setCurrentWorkspaceFilterState] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Refresh workspaces list
+  const refreshWorkspaces = useCallback(() => {
+    invoke<Workspace[]>("list_workspaces")
+      .then(setWorkspaces)
+      .catch(() => {});
+  }, []);
+
+  // Initial load
   useEffect(() => {
     const fetchSessions = () => {
       invoke<Session[]>("list_sessions").then(setSessions);
     };
     fetchSessions();
-    return subscribeAny(fetchSessions);
-  }, [refreshKey]);
+    refreshWorkspaces();
+
+    // Subscribe to session changes
+    const unsubSessions = subscribeAny(fetchSessions);
+    // Subscribe to workspace filter changes
+    const unsubFilter = subscribeWorkspaceFilter(() => {
+      setCurrentWorkspaceFilterState(getCurrentWorkspaceFilter());
+    });
+
+    return () => {
+      unsubSessions();
+      unsubFilter();
+    };
+  }, [refreshKey, refreshWorkspaces]);
+
+  // Get workspace name from path
+  const getWorkspaceName = useCallback(
+    (path: string | null): string => {
+      if (!path) return "Unknown";
+      const ws = workspaces.find((w) => w.path === path);
+      return ws?.name ?? path.split("/").pop() ?? path;
+    },
+    [workspaces]
+  );
+
+  // Filter sessions by current workspace filter
+  const filteredSessions = sessions.filter((s) => {
+    if (currentWorkspaceFilter === null) return true;
+    return s.workspace === currentWorkspaceFilter;
+  });
+
+  // Sessions from other workspaces with active agents
+  const externalActiveSessions = currentWorkspaceFilter
+    ? getSendingSessionsOutsideWorkspace(currentWorkspaceFilter).filter(
+        (rec) => rec.session
+      )
+    : [];
+
+  const handleWorkspaceFilterChange = (path: string | null) => {
+    setCurrentWorkspaceFilter(path);
+  };
 
   const createSession = async () => {
     setError(null);
@@ -90,16 +145,55 @@ export default function Sidebar({
       </button>
       {error && <p className="fail small">{error}</p>}
 
+      {/* Workspace filter dropdown */}
+      <div className="field-group compact workspace-filter">
+        <label>Filter by workspace</label>
+        <select
+          className="workspace-picker"
+          value={currentWorkspaceFilter ?? ""}
+          onChange={(e) => handleWorkspaceFilterChange(e.target.value || null)}
+        >
+          <option value="">All workspaces</option>
+          {workspaces.map((w) => (
+            <option key={w.id} value={w.path}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* External active sessions (from other workspaces) */}
+      {externalActiveSessions.length > 0 && (
+        <div className="external-active-section">
+          <p className="hint small">Running in other workspaces:</p>
+          {externalActiveSessions.map((rec) =>
+            rec.session ? (
+              <ExternalSessionItem
+                key={rec.session.id}
+                session={rec.session}
+                onSelect={() => {
+                  setCurrentWorkspaceFilter(rec.session!.workspace);
+                  onSelectSession(rec.session!.id);
+                }}
+                getWorkspaceName={getWorkspaceName}
+              />
+            ) : null
+          )}
+        </div>
+      )}
+
       <div className="session-list">
-        {sessions.map((s) => (
+        {filteredSessions.map((s) => (
           <SessionListItem
             key={s.id}
             session={s}
             active={s.id === activeSessionId}
             onSelect={() => onSelectSession(s.id)}
+            showWorkspace={currentWorkspaceFilter === null}
+            getWorkspaceName={getWorkspaceName}
           />
         ))}
-        {sessions.length === 0 && (
+        {filteredSessions.length === 0 && externalActiveSessions.length === 0 && (
           <p className="hint small">No sessions yet.</p>
         )}
       </div>
@@ -211,10 +305,14 @@ function SessionListItem({
   session,
   active,
   onSelect,
+  showWorkspace,
+  getWorkspaceName,
 }: {
   session: Session;
   active: boolean;
   onSelect: () => void;
+  showWorkspace?: boolean;
+  getWorkspaceName?: (path: string | null) => string;
 }) {
   const { sending, unseenActivity } = useAgentSession(session.id);
   return (
@@ -235,6 +333,58 @@ function SessionListItem({
         )}
         <span className="session-mode">{session.mode}</span>
       </span>
+      {showWorkspace && session.workspace && getWorkspaceName && (
+        <span className="session-workspace" title={session.workspace}>
+          {getWorkspaceName(session.workspace)}
+        </span>
+      )}
     </button>
+  );
+}
+
+/** A session running in another workspace — shown at the top of the
+ * session list with a workspace indicator so users know where to look
+ * if they want to check on it. */
+function ExternalSessionItem({
+  session,
+  onSelect,
+  getWorkspaceName,
+}: {
+  session: Session;
+  onSelect: () => void;
+  getWorkspaceName: (path: string | null) => string;
+}) {
+  const { sending } = useAgentSession(session.id);
+  return (
+    <button className="session-item external-active" onClick={onSelect}>
+      <span className="session-title">{session.title}</span>
+      <span className="session-item-right">
+        {sending && <span className="session-working-dot" title="Working..." />}
+        <span className="session-mode">{session.mode}</span>
+      </span>
+      <span className="session-workspace external" title={session.workspace}>
+        <WorkspaceIcon />
+        {getWorkspaceName(session.workspace)}
+      </span>
+    </button>
+  );
+}
+
+function WorkspaceIcon() {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ marginRight: 4, opacity: 0.7 }}
+    >
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9,22 9,12 15,12 15,22" />
+    </svg>
   );
 }

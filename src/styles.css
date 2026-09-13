@@ -2246,3 +2246,64 @@ button.github-card:hover {
 .subagent-summary.fail {
   color: var(--danger);
 }
+/* Workspace filter in sidebar */
+.workspace-filter {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.workspace-filter label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Session workspace indicator */
+.session-item {
+  position: relative;
+}
+
+.session-item .session-workspace {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* External active sessions section */
+.external-active-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.external-active-section .hint {
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+/* External session item (running in another workspace) */
+.session-item.external-active {
+  opacity: 0.85;
+  background: var(--surface-2);
+}
+
+.session-item.external-active:hover {
+  opacity: 1;
+}
+
+/* External workspace indicator with icon */
+.session-workspace.external {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  font-size: 11px;
+  margin-top: 4px;
+}
