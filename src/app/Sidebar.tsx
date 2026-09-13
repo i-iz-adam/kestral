@@ -34,7 +34,6 @@ export default function Sidebar({
   const [mode, setMode] = useState<Mode>("coding");
   const [planning, setPlanning] = useState(true);
   const [subagents, setSubagents] = useState(true);
-  const [repo, setRepo] = useState("");
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +51,6 @@ export default function Sidebar({
         title,
         mode,
         planningEnabled: planning,
-        repo: repo.trim() || null,
         subagentsEnabled: subagents,
         workspace: workspacePath,
       });
@@ -104,12 +102,6 @@ export default function Sidebar({
             />
             Use sub-agents to keep context clean (recommended)
           </label>
-          <input
-            className="repo-input"
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            placeholder="owner/repo (optional)"
-          />
         </>
       )}
 

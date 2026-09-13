@@ -38,8 +38,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   // to unmount this entirely) no longer loses a turn in progress.
   const { session, timeline, liveCalls, sending } = useAgentSession(sessionId);
   const [input, setInput] = useState("");
-  const [editingRepo, setEditingRepo] = useState(false);
-  const [repoInput, setRepoInput] = useState("");
   const [editingWorkspace, setEditingWorkspace] = useState(false);
   const [workspaceDraft, setWorkspaceDraft] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -50,10 +48,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     ensureAgentEventsStarted();
     loadSession(sessionId);
   }, [sessionId]);
-
-  useEffect(() => {
-    setRepoInput(session?.linked_repo ?? "");
-  }, [session?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -183,13 +177,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     composerRef.current?.focus();
   };
 
-  const saveRepo = async () => {
-    const repo = repoInput.trim() || null;
-    await invoke("set_session_repo", { id: sessionId, repo });
-    mutateSessionLocally(sessionId, (s) => ({ ...s, linked_repo: repo }));
-    setEditingRepo(false);
-  };
-
   const saveWorkspace = async (path: string) => {
     await invoke("set_session_workspace", { id: sessionId, workspace: path });
     mutateSessionLocally(sessionId, (s) => ({ ...s, workspace: path }));
@@ -212,7 +199,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           key={call.call_id}
           event={call}
           calls={nested}
-          linkedRepo={session.linked_repo}
+          workspace={session.workspace}
           onPromptFix={promptFix}
           onApprove={approve}
         />
@@ -223,7 +210,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         <GithubToolCard
           key={call.call_id}
           event={call}
-          linkedRepo={session.linked_repo}
+          workspace={session.workspace}
           onPromptFix={promptFix}
         />
       );
@@ -346,21 +333,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
               title={session.workspace}
             >
               {folderName(session.workspace)}
-            </button>
-          )}
-          {editingRepo ? (
-            <>
-              <input
-                value={repoInput}
-                onChange={(e) => setRepoInput(e.target.value)}
-                placeholder="owner/repo"
-                style={{ width: 160 }}
-              />
-              <button onClick={saveRepo}>Save</button>
-            </>
-          ) : (
-            <button className="repo-badge" onClick={() => setEditingRepo(true)}>
-              {session.linked_repo ? session.linked_repo : "Link a repo"}
             </button>
           )}
           {session.mode === "coding" && (

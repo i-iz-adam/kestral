@@ -104,7 +104,6 @@ fn create_session(
     title: String,
     mode: String,
     planning_enabled: bool,
-    repo: Option<String>,
     subagents_enabled: bool,
     workspace: Option<String>,
 ) -> Result<sessions::Session, String> {
@@ -121,18 +120,8 @@ fn create_session(
         mode,
         workspace,
         planning_enabled,
-        repo,
         subagents_enabled,
     ))
-}
-
-#[tauri::command]
-fn set_session_repo(
-    app_handle: tauri::AppHandle,
-    id: String,
-    repo: Option<String>,
-) -> Result<(), String> {
-    sessions::set_linked_repo(&app_handle, &id, repo)
 }
 
 #[tauri::command]
@@ -230,10 +219,10 @@ async fn github_action(
     app_handle: tauri::AppHandle,
     name: String,
     args: serde_json::Value,
-    linked_repo: Option<String>,
+    workspace: String,
 ) -> Result<serde_json::Value, String> {
     let token = github::load_token(&app_handle).ok_or("GitHub is not connected")?;
-    let raw = github::execute(&token, linked_repo.as_deref(), &name, &args).await?;
+    let raw = github::execute(&token, &workspace, &name, &args).await?;
     serde_json::from_str(&raw).map_err(|e| e.to_string())
 }
 
@@ -350,7 +339,6 @@ fn main() {
             list_sessions,
             get_session,
             delete_session,
-            set_session_repo,
             set_session_workspace,
             set_session_subagents,
             set_session_planning,

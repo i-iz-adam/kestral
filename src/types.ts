@@ -18,7 +18,6 @@ export interface Session {
   mode: "coding" | "general";
   planning_enabled: boolean;
   workspace: string;
-  linked_repo?: string | null;
   subagents_enabled: boolean;
   messages: ChatMessage[];
   created_at: number;

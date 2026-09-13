@@ -5,7 +5,7 @@ import type { ToolCallEventPayload, GithubComment } from "../types";
 
 interface Props {
   event: ToolCallEventPayload;
-  linkedRepo?: string | null;
+  workspace: string;
   onPromptFix: (text: string) => void;
 }
 
@@ -18,7 +18,7 @@ function tryParse(json?: string): any {
   }
 }
 
-export default function GithubToolCard({ event, linkedRepo, onPromptFix }: Props) {
+export default function GithubToolCard({ event, workspace, onPromptFix }: Props) {
   const [open, setOpen] = useState(false);
   const [comments, setComments] = useState<GithubComment[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,7 +34,7 @@ export default function GithubToolCard({ event, linkedRepo, onPromptFix }: Props
       await invoke("github_action", {
         name,
         args: { owner: argsObj.owner, repo: argsObj.repo, ...extraArgs },
-        linkedRepo,
+        workspace,
       });
       return true;
     } catch (e) {
@@ -54,7 +54,7 @@ export default function GithubToolCard({ event, linkedRepo, onPromptFix }: Props
           const result = await invoke<GithubComment[]>("github_action", {
             name: "github_list_issue_comments",
             args: { owner: argsObj.owner, repo: argsObj.repo, number },
-            linkedRepo,
+            workspace,
           });
           setComments(result as unknown as GithubComment[]);
         } catch {

@@ -105,6 +105,7 @@ pub(crate) async fn run(
             return Ok(assistant_msg.content.unwrap_or_default());
         }
 
+        let mut call_signatures: Vec<(String, String)> = Vec::with_capacity(tool_calls.len());
         for call in &tool_calls {
             if call.function.name == "delegate_to_subagent" {
                 // Defensive only — this tool is never in tools_value above,
@@ -130,20 +131,20 @@ pub(crate) async fn run(
             )
             .await;
 
-            // Record for loop detection
-            loop_detector.record(
-                call.function.name.clone(),
-                &call.function.arguments,
-                tool_msg.content.as_deref().unwrap_or(""),
-            );
-
+            call_signatures.push((call.function.name.clone(), call.function.arguments.clone()));
             messages.push(tool_msg);
         }
 
-        // Detect infinite loops: same tool call repeating with no progress
-        if loop_detector.is_looping() || loop_detector.is_stuck_on_same_tool(10) {
+        // One signature per turn (reasoning text + every call it made this
+        // turn), same approach as the top-level agent loop.
+        let thought = assistant_msg.content.as_deref().unwrap_or("");
+        loop_detector.record_step(thought, &call_signatures);
+
+        // Detect infinite loops: the exact same reasoning and the exact
+        // same tool call(s) repeating verbatim, several turns running.
+        if loop_detector.is_looping() {
             return Err(format!(
-                "Sub-agent stopped after {} steps: infinite loop detected (same tool call repeating with no progress).",
+                "Sub-agent stopped after {} steps: infinite loop detected (same thinking and tool call repeating with no progress).",
                 step_count
             ));
         }

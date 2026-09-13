@@ -1667,15 +1667,6 @@ button:not(:disabled):hover {
   cursor: pointer;
 }
 
-.repo-input {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
-  color: var(--text);
-  font-size: 13px;
-}
-
 /* ---- skills panel ---- */
 
 .skill-list {

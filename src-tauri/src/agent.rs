@@ -14,28 +14,30 @@ use crate::skills;
 use crate::subagent;
 use crate::tools;
 
-/// Infinite-loop detector: tracks recent tool calls and their results to
-/// detect when an agent is stuck in a repeating pattern with no progress.
-/// Each entry stores (tool_name, args_hash, result_hash) for a sliding window.
+/// Infinite-loop detector: tracks a signature of each full step — the
+/// model's reasoning/answer text for that turn (its "thoughts", including
+/// any inline <think> block) plus exactly which tool calls it issued —
+/// and flags a loop once that signature repeats verbatim for several
+/// consecutive steps in a row.
+///
+/// This deliberately does NOT key on tool name alone: an agent calling
+/// `read_file` ten times in a row on ten different paths is normal work,
+/// not a loop, and the old `is_stuck_on_same_tool` check was flagging
+/// exactly that as a false positive. A real loop is the model calling the
+/// *exact same thing* — same reasoning, same tool(s), same arguments —
+/// over and over with no variation, which is what `record_step` captures
+/// as a single hash per step rather than one entry per individual tool
+/// call.
 #[derive(Default)]
 pub(crate) struct LoopDetector {
-    entries: Vec<(String, u64, u64)>,
+    signatures: Vec<u64>,
     max_history: usize,
-    same_tool_threshold: usize,
+    threshold: usize,
 }
 
 impl LoopDetector {
-    pub(crate) fn new(max_history: usize, same_tool_threshold: usize) -> Self {
-        Self { entries: Vec::with_capacity(max_history), max_history, same_tool_threshold }
-    }
-
-    pub(crate) fn record(&mut self, tool_name: String, args_json: &str, result: &str) {
-        let args_hash = Self::hash_str(args_json);
-        let result_hash = Self::hash_str(result);
-        self.entries.push((tool_name, args_hash, result_hash));
-        if self.entries.len() > self.max_history {
-            self.entries.remove(0);
-        }
+    pub(crate) fn new(max_history: usize, threshold: usize) -> Self {
+        Self { signatures: Vec::with_capacity(max_history), max_history, threshold }
     }
 
     fn hash_str(s: &str) -> u64 {
@@ -47,41 +49,44 @@ impl LoopDetector {
         hasher.finish()
     }
 
-    /// Returns true if we're stuck looping: same tool called consecutively
-    /// N times with the same args and same result (no progress).
-    pub(crate) fn is_looping(&self) -> bool {
-        if self.entries.len() < self.same_tool_threshold {
-            return false;
+    /// Records one full step: the assistant's reasoning/answer text for
+    /// this turn plus every tool call it issued this turn (name + raw
+    /// arguments, in order). Call once per turn — after all of that
+    /// turn's tool calls are known — not once per individual tool call,
+    /// so a turn that issues three calls is one signature, not three.
+    /// Whether the calls actually *succeeded* deliberately isn't part of
+    /// the signature: a flaky command whose output differs slightly each
+    /// time is still a loop if the model keeps reasoning and calling
+    /// identically regardless of what comes back.
+    pub(crate) fn record_step(&mut self, thought: &str, calls: &[(String, String)]) {
+        let mut combined = String::from(thought.trim());
+        for (name, args) in calls {
+            combined.push('\u{1}');
+            combined.push_str(name);
+            combined.push('\u{1}');
+            combined.push_str(args);
         }
-        let start = self.entries.len() - self.same_tool_threshold;
-        let reference = &self.entries[start];
-        for i in (start + 1)..self.entries.len() {
-            if self.entries[i] != *reference {
-                return false;
-            }
+        self.signatures.push(Self::hash_str(&combined));
+        if self.signatures.len() > self.max_history {
+            self.signatures.remove(0);
         }
-        true
     }
 
-    /// More aggressive check: same tool called N times regardless of args/result.
-    /// Catches cases where tool results vary but nothing meaningful changes.
-    pub(crate) fn is_stuck_on_same_tool(&self, consecutive_count: usize) -> bool {
-        if self.entries.len() < consecutive_count {
+    /// True once the last `threshold` steps all produced the exact same
+    /// signature — the model repeating the same thought and the same
+    /// call(s) verbatim, with no variation at all.
+    pub(crate) fn is_looping(&self) -> bool {
+        if self.signatures.len() < self.threshold {
             return false;
         }
-        let start = self.entries.len() - consecutive_count;
-        let reference_name = &self.entries[start].0;
-        for i in (start + 1)..self.entries.len() {
-            if self.entries[i].0 != *reference_name {
-                return false;
-            }
-        }
-        true
+        let start = self.signatures.len() - self.threshold;
+        let reference = self.signatures[start];
+        self.signatures[start..].iter().all(|s| *s == reference)
     }
 
     #[allow(dead_code)]
     fn reset(&mut self) {
-        self.entries.clear();
+        self.signatures.clear();
     }
 }
 
@@ -230,7 +235,7 @@ pub(crate) async fn execute_tool(
     if name.starts_with("github_") {
         let token = github::load_token(app_handle)
             .ok_or("GitHub is not connected — add a token in the GitHub tab first")?;
-        return github::execute(&token, session.linked_repo.as_deref(), name, args).await;
+        return github::execute(&token, &session.workspace, name, args).await;
     }
     tools::execute(&session.workspace, name, args)
 }
@@ -507,6 +512,7 @@ async fn run_turn_inner(
             return Ok(());
         }
 
+        let mut call_signatures: Vec<(String, String)> = Vec::with_capacity(tool_calls.len());
         for call in &tool_calls {
             let tool_msg = handle_tool_call(
                 app_handle,
@@ -518,22 +524,22 @@ async fn run_turn_inner(
             )
             .await;
 
-            // Record for loop detection
-            loop_detector.record(
-                call.function.name.clone(),
-                &call.function.arguments,
-                tool_msg.content.as_deref().unwrap_or(""),
-            );
-
+            call_signatures.push((call.function.name.clone(), call.function.arguments.clone()));
             session.messages.push(tool_msg);
         }
 
+        // One signature per turn (reasoning text + every call it made this
+        // turn) — not one per individual tool call — so calling several
+        // different tools in one turn doesn't look like several steps.
+        loop_detector.record_step(&text, &call_signatures);
+
         sessions::save(app_handle, &session);
 
-        // Detect infinite loops after tool execution
-        if loop_detector.is_looping() || loop_detector.is_stuck_on_same_tool(10) {
+        // Detect infinite loops: the exact same reasoning and the exact
+        // same tool call(s) repeating verbatim, several turns running.
+        if loop_detector.is_looping() {
             let msg = format!(
-                "Stopped after {} steps: infinite loop detected (same tool call repeating with no progress).",
+                "Stopped after {} steps: infinite loop detected (same thinking and tool call repeating with no progress).",
                 step_count
             );
             session.messages.push(ChatMessage {

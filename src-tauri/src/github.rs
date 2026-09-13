@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GithubConfig {
@@ -47,15 +48,16 @@ pub async fn test_token(token: &str) -> Result<String, String> {
 }
 
 /// The tool schema exposed to the model. Every tool takes optional
-/// owner/repo — if omitted, `execute` falls back to the session's linked
-/// repo (see resolve_repo below).
+/// owner/repo — if omitted, `execute` falls back to whatever repo the
+/// session's workspace folder is a git checkout of (see resolve_repo and
+/// repo_for_workspace below).
 pub fn tool_definitions() -> Value {
     json!([
         {
             "type": "function",
             "function": {
                 "name": "github_list_issues",
-                "description": "List open issues for a repo. Omit owner/repo to use the repo linked to this session.",
+                "description": "List open issues for a repo. Omit owner/repo to use the repo the current workspace's git remote points at.",
                 "parameters": {
                     "type": "object",
                     "properties": { "owner": {"type": "string"}, "repo": {"type": "string"} }
@@ -126,7 +128,7 @@ pub fn tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "github_list_open_prs",
-                "description": "List open pull requests for a repo. Omit owner/repo to use the repo linked to this session.",
+                "description": "List open pull requests for a repo. Omit owner/repo to use the repo the current workspace's git remote points at.",
                 "parameters": {
                     "type": "object",
                     "properties": { "owner": {"type": "string"}, "repo": {"type": "string"} }
@@ -172,19 +174,57 @@ pub fn is_mutating(name: &str) -> bool {
     matches!(name, "github_comment_issue" | "github_close_issue" | "github_merge_pr")
 }
 
-fn resolve_repo(args: &Value, linked: Option<&str>) -> Result<(String, String), String> {
+/// Owner/repo parsed out of a git remote URL, in any of the shapes
+/// `origin` commonly comes in:
+///   https://github.com/owner/repo.git
+///   https://github.com/owner/repo
+///   git@github.com:owner/repo.git
+///   ssh://git@github.com/owner/repo.git
+fn parse_owner_repo(remote_url: &str) -> Option<(String, String)> {
+    let trimmed = remote_url.trim().trim_end_matches(".git");
+    let after_host = if let Some(idx) = trimmed.find("github.com") {
+        &trimmed[idx + "github.com".len()..]
+    } else {
+        return None;
+    };
+    let path = after_host.trim_start_matches(':').trim_start_matches('/');
+    let mut parts = path.splitn(2, '/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim();
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some((owner.to_string(), repo.to_string()))
+}
+
+/// Whatever GitHub repo the given workspace folder's `origin` remote
+/// points at, if any. Returns None (rather than erroring) for a folder
+/// that isn't a git repo, has no `origin`, or points somewhere other than
+/// github.com — every one of those is a normal, unremarkable case, not a
+/// failure worth surfacing on its own.
+pub fn repo_for_workspace(workspace: &str) -> Option<(String, String)> {
+    let output = Command::new("git")
+        .args(["-C", workspace, "remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let url = String::from_utf8_lossy(&output.stdout);
+    parse_owner_repo(&url)
+}
+
+fn resolve_repo(args: &Value, workspace: &str) -> Result<(String, String), String> {
     let owner = args.get("owner").and_then(|v| v.as_str()).map(str::to_string);
     let repo = args.get("repo").and_then(|v| v.as_str()).map(str::to_string);
     if let (Some(o), Some(r)) = (owner, repo) {
         return Ok((o, r));
     }
-    if let Some(l) = linked {
-        let parts: Vec<&str> = l.splitn(2, '/').collect();
-        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-            return Ok((parts[0].to_string(), parts[1].to_string()));
-        }
-    }
-    Err("No owner/repo given, and no repo linked to this session".to_string())
+    repo_for_workspace(workspace).ok_or_else(|| {
+        "No owner/repo given, and this session's workspace isn't linked to a GitHub repo \
+         (no `origin` remote pointing at github.com was found)."
+            .to_string()
+    })
 }
 
 async fn request(
@@ -215,7 +255,7 @@ async fn request(
 /// agent would, via the github_action command in main.rs).
 pub async fn execute(
     token: &str,
-    linked_repo: Option<&str>,
+    workspace: &str,
     name: &str,
     args: &Value,
 ) -> Result<String, String> {
@@ -223,48 +263,48 @@ pub async fn execute(
 
     match name {
         "github_list_issues" => {
-            let (owner, repo) = resolve_repo(args, linked_repo)?;
+            let (owner, repo) = resolve_repo(args, workspace)?;
             let url = format!("https://api.github.com/repos/{}/{}/issues?state=open", owner, repo);
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_get_issue" => {
-            let (owner, repo) = resolve_repo(args, linked_repo)?;
+            let (owner, repo) = resolve_repo(args, workspace)?;
             let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
             let url = format!("https://api.github.com/repos/{}/{}/issues/{}", owner, repo, number);
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_list_issue_comments" => {
-            let (owner, repo) = resolve_repo(args, linked_repo)?;
+            let (owner, repo) = resolve_repo(args, workspace)?;
             let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
             let url = format!("https://api.github.com/repos/{}/{}/issues/{}/comments", owner, repo, number);
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_comment_issue" => {
-            let (owner, repo) = resolve_repo(args, linked_repo)?;
+            let (owner, repo) = resolve_repo(args, workspace)?;
             let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
             let body = args.get("body").and_then(|v| v.as_str()).ok_or("missing body")?;
             let url = format!("https://api.github.com/repos/{}/{}/issues/{}/comments", owner, repo, number);
             request(&client, reqwest::Method::POST, token, &url, Some(json!({ "body": body }))).await
         }
         "github_close_issue" => {
-            let (owner, repo) = resolve_repo(args, linked_repo)?;
+            let (owner, repo) = resolve_repo(args, workspace)?;
             let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
             let url = format!("https://api.github.com/repos/{}/{}/issues/{}", owner, repo, number);
             request(&client, reqwest::Method::PATCH, token, &url, Some(json!({ "state": "closed" }))).await
         }
         "github_list_open_prs" => {
-            let (owner, repo) = resolve_repo(args, linked_repo)?;
+            let (owner, repo) = resolve_repo(args, workspace)?;
             let url = format!("https://api.github.com/repos/{}/{}/pulls?state=open", owner, repo);
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_get_pr" => {
-            let (owner, repo) = resolve_repo(args, linked_repo)?;
+            let (owner, repo) = resolve_repo(args, workspace)?;
             let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
             let url = format!("https://api.github.com/repos/{}/{}/pulls/{}", owner, repo, number);
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_merge_pr" => {
-            let (owner, repo) = resolve_repo(args, linked_repo)?;
+            let (owner, repo) = resolve_repo(args, workspace)?;
             let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
             let url = format!("https://api.github.com/repos/{}/{}/pulls/{}/merge", owner, repo, number);
             request(&client, reqwest::Method::PUT, token, &url, Some(json!({}))).await

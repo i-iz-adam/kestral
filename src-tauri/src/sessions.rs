@@ -17,10 +17,6 @@ pub struct Session {
     pub mode: String,
     pub planning_enabled: bool,
     pub workspace: String,
-    /// "owner/repo" — lets GitHub tool calls omit owner/repo when this
-    /// session is about a specific repo. Optional, settable after creation.
-    #[serde(default)]
-    pub linked_repo: Option<String>,
     /// Whether the agent has delegate_to_subagent available and is told to
     /// prefer it for bulky/exploratory work. Defaults to true (including
     /// for sessions saved before this field existed) — sub-agents are the
@@ -54,7 +50,6 @@ pub fn create(
     mode: String,
     workspace: String,
     planning_enabled: bool,
-    linked_repo: Option<String>,
     subagents_enabled: bool,
 ) -> Session {
     let session = Session {
@@ -63,20 +58,12 @@ pub fn create(
         mode,
         planning_enabled,
         workspace,
-        linked_repo,
         subagents_enabled,
         messages: vec![],
         created_at: now_ms(),
     };
     save(app_handle, &session);
     session
-}
-
-pub fn set_linked_repo(app_handle: &tauri::AppHandle, id: &str, repo: Option<String>) -> Result<(), String> {
-    let mut session = load(app_handle, id).ok_or("Session not found")?;
-    session.linked_repo = repo;
-    save(app_handle, &session);
-    Ok(())
 }
 
 pub fn set_workspace(app_handle: &tauri::AppHandle, id: &str, workspace: String) -> Result<(), String> {

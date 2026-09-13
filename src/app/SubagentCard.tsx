@@ -6,7 +6,7 @@ import ToolCallRow from "./ToolCallRow";
 interface Props {
   event: ToolCallEventPayload; // the delegate_to_subagent call itself
   calls: ToolCallEventPayload[]; // its nested tool calls, arrival order
-  linkedRepo?: string | null;
+  workspace: string;
   onPromptFix: (text: string) => void;
   onApprove: (callId: string, approved: boolean) => void;
 }
@@ -14,7 +14,7 @@ interface Props {
 export default function SubagentCard({
   event,
   calls,
-  linkedRepo,
+  workspace,
   onPromptFix,
   onApprove,
 }: Props) {
@@ -69,7 +69,7 @@ export default function SubagentCard({
               <GithubToolCard
                 key={c.call_id}
                 event={c}
-                linkedRepo={linkedRepo}
+                workspace={workspace}
                 onPromptFix={onPromptFix}
               />
             ) : (
