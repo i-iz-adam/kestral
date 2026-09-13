@@ -6,6 +6,7 @@ import ToolCallRow from "./ToolCallRow";
 import SubagentCard from "./SubagentCard";
 import DiffToolCard from "./DiffToolCard";
 import MessageContent from "./MessageContent";
+import WorkspacePicker from "./WorkspacePicker";
 import { buildHistoryTimeline } from "./historyTimeline";
 import { looksLikeSlashCommand, parseSlashCommand, filterSlashCommands, SLASH_HELP, type SlashCommandDef } from "./slashCommands";
 import SlashCommandMenu from "./SlashCommandMenu";
@@ -19,6 +20,16 @@ import {
 } from "./agentStore";
 import { useAgentSession } from "./useAgentSession";
 
+/** Last path segment for display — "/Users/adam/projects/kestrel" reads
+ * as "kestrel" in the header badge, with the full path still available
+ * via the title tooltip. Falls back to the whole string for a bare
+ * drive root or an unexpected empty value. */
+function folderName(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const parts = trimmed.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
 export default function SessionView({ sessionId }: { sessionId: string }) {
   // Live turn state (timeline/liveCalls/sending) and the persisted session
   // record both come from a global store that keeps running regardless of
@@ -29,6 +40,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const [input, setInput] = useState("");
   const [editingRepo, setEditingRepo] = useState(false);
   const [repoInput, setRepoInput] = useState("");
+  const [editingWorkspace, setEditingWorkspace] = useState(false);
+  const [workspaceDraft, setWorkspaceDraft] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -142,6 +155,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   };
 
+  const [justSent, setJustSent] = useState(false);
+
   const send = async () => {
     if (!input.trim() || sending) return;
     const text = input;
@@ -151,6 +166,9 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       runSlashCommand(text);
       return;
     }
+
+    setJustSent(true);
+    setTimeout(() => setJustSent(false), 400);
 
     markSendingStart(sessionId);
     // Errors surface via the global agent://turn-end listener (agentStore.ts)
@@ -175,6 +193,13 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     await invoke("set_session_repo", { id: sessionId, repo });
     mutateSessionLocally(sessionId, (s) => ({ ...s, linked_repo: repo }));
     setEditingRepo(false);
+  };
+
+  const saveWorkspace = async (path: string) => {
+    await invoke("set_session_workspace", { id: sessionId, workspace: path });
+    mutateSessionLocally(sessionId, (s) => ({ ...s, workspace: path }));
+    setEditingWorkspace(false);
+    pushSystemNote(`Workspace switched to ${path}.`);
   };
 
   if (!session) return <div className="loading-screen">Loading session...</div>;
@@ -305,6 +330,29 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         <h2>{session.title}</h2>
         <span className="hint">{session.mode}</span>
         <div className="repo-link">
+          {editingWorkspace ? (
+            <span onBlur={() => setTimeout(() => setEditingWorkspace(false), 150)}>
+              <WorkspacePicker
+                className="inline"
+                value={workspaceDraft ?? session.workspace}
+                onChange={(path) => {
+                  setWorkspaceDraft(path);
+                  saveWorkspace(path);
+                }}
+              />
+            </span>
+          ) : (
+            <button
+              className="repo-badge workspace-badge"
+              onClick={() => {
+                setWorkspaceDraft(session.workspace);
+                setEditingWorkspace(true);
+              }}
+              title={session.workspace}
+            >
+              {folderName(session.workspace)}
+            </button>
+          )}
           {editingRepo ? (
             <>
               <input
@@ -395,7 +443,11 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                 : "Ask anything..."
             }
           />
-          <button className={"primary" + (sending ? " sending" : "")} onClick={send} disabled={sending}>
+          <button
+            className={"primary" + (sending ? " sending" : "") + (justSent ? " sent" : "")}
+            onClick={send}
+            disabled={sending}
+          >
             {sending ? "Working" : "Send"}
           </button>
         </div>

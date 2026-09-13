@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import type { Session } from "../types";
 import EngineStatusBadge from "./EngineStatusBadge";
+import WorkspacePicker from "./WorkspacePicker";
 import { useAgentSession } from "./useAgentSession";
 
 type Mode = "coding" | "general";
@@ -34,6 +35,7 @@ export default function Sidebar({
   const [planning, setPlanning] = useState(true);
   const [subagents, setSubagents] = useState(true);
   const [repo, setRepo] = useState("");
+  const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +54,7 @@ export default function Sidebar({
         planningEnabled: planning,
         repo: repo.trim() || null,
         subagentsEnabled: subagents,
+        workspace: workspacePath,
       });
       onSessionCreated(session.id);
     } catch (e) {
@@ -76,6 +79,11 @@ export default function Sidebar({
         >
           General AI
         </button>
+      </div>
+
+      <div className="field-group compact">
+        <label>Workspace</label>
+        <WorkspacePicker value={workspacePath} onChange={setWorkspacePath} autoSelectFirst />
       </div>
 
       {mode === "coding" && (
@@ -236,19 +244,23 @@ function SessionListItem({
   active: boolean;
   onSelect: () => void;
 }) {
-  const { sending } = useAgentSession(session.id);
+  const { sending, unseenActivity } = useAgentSession(session.id);
   return (
     <button
       className={
         "session-item" +
         (session.mode === "general" ? " mode-general" : "") +
-        (active ? " active" : "")
+        (active ? " active" : "") +
+        (unseenActivity ? " has-activity" : "")
       }
       onClick={onSelect}
     >
       <span className="session-title">{session.title}</span>
       <span className="session-item-right">
         {sending && <span className="session-working-dot" title="Working..." />}
+        {!sending && unseenActivity && (
+          <span className="session-ready-dot" title="Finished while you were away" />
+        )}
         <span className="session-mode">{session.mode}</span>
       </span>
     </button>
