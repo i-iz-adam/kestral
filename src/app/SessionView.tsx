@@ -110,20 +110,10 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     pushSystemNote("Planning mode on — mutating tool calls will need approval again.");
   };
 
-  const togglePlanning = () => {
-    if (!session) return;
-    if (session.planning_enabled) turnPlanningOff();
-    else turnPlanningOn();
-  };
-
   const setSubagents = async (enabled: boolean, note = true) => {
     await invoke("set_session_subagents", { id: sessionId, enabled });
     mutateSessionLocally(sessionId, (s) => ({ ...s, subagents_enabled: enabled }));
     if (note) pushSystemNote(`Sub-agents turned ${enabled ? "on" : "off"}.`);
-  };
-
-  const toggleSubagents = () => {
-    if (session) setSubagents(!session.subagents_enabled, false);
   };
 
   const runSlashCommand = (raw: string) => {
@@ -334,20 +324,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
             >
               {folderName(session.workspace)}
             </button>
-          )}
-          {session.mode === "coding" && (
-            <>
-              <button
-                className={"repo-badge" + (session.planning_enabled ? "" : " off")}
-                onClick={togglePlanning}
-                title="Mutating tool calls pause for approval while this is on"
-              >
-                {session.planning_enabled ? "Planning: on" : "Planning: off"}
-              </button>
-              <button className="repo-badge" onClick={toggleSubagents}>
-                {session.subagents_enabled ? "Sub-agents: on" : "Sub-agents: off"}
-              </button>
-            </>
           )}
         </div>
       </div>

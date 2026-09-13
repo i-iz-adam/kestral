@@ -33,8 +33,6 @@ export default function Sidebar({
 }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [mode, setMode] = useState<Mode>("coding");
-  const [planning, setPlanning] = useState(true);
-  const [subagents, setSubagents] = useState(true);
   const [workspacePath, setWorkspacePath] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +53,6 @@ export default function Sidebar({
       const session = await invoke<Session>("create_session", {
         title,
         mode,
-        planningEnabled: planning,
-        subagentsEnabled: subagents,
         workspace: workspacePath,
       });
       onSessionCreated(session.id);
@@ -88,27 +84,6 @@ export default function Sidebar({
         <label>Workspace</label>
         <WorkspacePicker value={workspacePath} onChange={setWorkspacePath} autoSelectFirst />
       </div>
-
-      {mode === "coding" && (
-        <>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={planning}
-              onChange={(e) => setPlanning(e.target.checked)}
-            />
-            Planning mode (approve writes/commands)
-          </label>
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={subagents}
-              onChange={(e) => setSubagents(e.target.checked)}
-            />
-            Use sub-agents to keep context clean (recommended)
-          </label>
-        </>
-      )}
 
       <button className="primary" onClick={createSession} disabled={creating}>
         {creating ? "Creating..." : "New session"}
