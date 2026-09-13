@@ -4,6 +4,7 @@ import type { Session } from "../types";
 import EngineStatusBadge from "./EngineStatusBadge";
 import WorkspacePicker from "./WorkspacePicker";
 import { useAgentSession } from "./useAgentSession";
+import { subscribeAny } from "./agentStore";
 
 type Mode = "coding" | "general";
 
@@ -39,7 +40,11 @@ export default function Sidebar({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<Session[]>("list_sessions").then(setSessions);
+    const fetchSessions = () => {
+      invoke<Session[]>("list_sessions").then(setSessions);
+    };
+    fetchSessions();
+    return subscribeAny(fetchSessions);
   }, [refreshKey]);
 
   const createSession = async () => {

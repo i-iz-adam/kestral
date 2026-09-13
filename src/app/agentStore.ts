@@ -245,6 +245,12 @@ export function ensureAgentEventsStarted() {
     });
   });
 
+  listen<{ session_id: string; title: string }>("agent://session-title-updated", (evt) => {
+    const { session_id, title } = evt.payload;
+    mutateSessionLocally(session_id, (s) => ({ ...s, title }));
+    notifyAny();
+  });
+
   listen<TurnEndEventPayload>("agent://turn-end", async (evt) => {
     const { session_id, error } = evt.payload;
     // Refresh the persisted record first, then clear the live buffer in
