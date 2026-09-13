@@ -134,6 +134,15 @@ fn set_session_workspace(
 }
 
 #[tauri::command]
+fn set_session_title(
+    app_handle: tauri::AppHandle,
+    id: String,
+    title: String,
+) -> Result<(), String> {
+    sessions::set_title(&app_handle, &id, title)
+}
+
+#[tauri::command]
 fn set_session_subagents(
     app_handle: tauri::AppHandle,
     id: String,
@@ -340,6 +349,7 @@ fn main() {
             get_session,
             delete_session,
             set_session_workspace,
+            set_session_title,
             set_session_subagents,
             set_session_planning,
             approve_all_pending,

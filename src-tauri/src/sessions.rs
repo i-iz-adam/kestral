@@ -80,6 +80,13 @@ pub fn set_subagents_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: b
     Ok(())
 }
 
+pub fn set_title(app_handle: &tauri::AppHandle, id: &str, title: String) -> Result<(), String> {
+    let mut session = load(app_handle, id).ok_or("Session not found")?;
+    session.title = title;
+    save(app_handle, &session);
+    Ok(())
+}
+
 pub fn set_planning_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.planning_enabled = enabled;
