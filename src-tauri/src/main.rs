@@ -6,6 +6,7 @@ mod engine;
 mod github;
 mod omniroute;
 mod prompts;
+mod reflect;
 mod sessions;
 mod setup;
 mod skills;
@@ -284,6 +285,79 @@ async fn install_skill_from_url(
     skills::install_from_url(&app_handle, &url).await
 }
 
+/// Direct skill authoring from the UI (the SkillsPanel's own "new skill" /
+/// "edit skill" forms) — the exact same write_skill the agent's
+/// create_skill/edit_skill tools call, so a skill a human writes by hand
+/// and one the agent writes are indistinguishable once saved.
+#[tauri::command]
+fn create_skill(
+    app_handle: tauri::AppHandle,
+    id: Option<String>,
+    name: String,
+    description: String,
+    content: String,
+    triggers: Vec<String>,
+) -> Result<skills::Skill, String> {
+    skills::write_skill(&app_handle, id.as_deref(), &name, &description, &content, &triggers)
+}
+
+#[derive(serde::Deserialize)]
+struct SkillEditInput {
+    old_string: String,
+    new_string: String,
+    #[serde(default)]
+    replace_all: bool,
+}
+
+#[tauri::command]
+fn edit_skill(
+    app_handle: tauri::AppHandle,
+    id: String,
+    edits: Vec<SkillEditInput>,
+) -> Result<String, String> {
+    let parsed: Vec<(String, String, bool)> = edits
+        .into_iter()
+        .map(|e| (e.old_string, e.new_string, e.replace_all))
+        .collect();
+    skills::edit_skill(&app_handle, &id, &parsed)
+}
+
+// ---- skill proposals (the reviewed half of the self-improvement loop) ----
+
+#[tauri::command]
+fn list_skill_proposals(app_handle: tauri::AppHandle) -> Vec<skills::SkillProposal> {
+    skills::list_proposals(&app_handle)
+}
+
+#[tauri::command]
+fn accept_skill_proposal(app_handle: tauri::AppHandle, id: String) -> Result<skills::Skill, String> {
+    skills::accept_proposal(&app_handle, &id)
+}
+
+#[tauri::command]
+fn reject_skill_proposal(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+    skills::reject_proposal(&app_handle, &id)
+}
+
+/// Lets the review UI tweak a proposal's content/name/description before
+/// accepting it, without round-tripping through reject-then-recreate.
+#[tauri::command]
+fn update_skill_proposal(
+    app_handle: tauri::AppHandle,
+    id: String,
+    name: String,
+    description: String,
+    content: String,
+    triggers: Vec<String>,
+) -> Result<(), String> {
+    let mut proposal = skills::get_proposal(&app_handle, &id).ok_or("proposal not found")?;
+    proposal.name = name;
+    proposal.description = description;
+    proposal.content = content;
+    proposal.triggers = triggers;
+    skills::propose(&app_handle, proposal).map(|_| ())
+}
+
 // ---- engine (managed OmniRoute process) ----
 
 #[tauri::command]
@@ -385,6 +459,12 @@ fn main() {
             toggle_skill,
             delete_skill,
             install_skill_from_url,
+            create_skill,
+            edit_skill,
+            list_skill_proposals,
+            accept_skill_proposal,
+            reject_skill_proposal,
+            update_skill_proposal,
             get_engine_status,
             is_engine_installed,
             install_engine,

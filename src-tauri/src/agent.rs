@@ -9,6 +9,7 @@ use crate::config;
 use crate::github;
 use crate::omniroute::{self, ChatMessage, ToolCall};
 use crate::prompts;
+use crate::reflect;
 use crate::sessions::{self, Session};
 use crate::skills;
 use crate::subagent;
@@ -255,7 +256,7 @@ pub(crate) async fn maybe_auto_generate_title(
 pub(crate) const MODEL: &str = "auto/coding";
 
 pub(crate) fn is_mutating(name: &str) -> bool {
-    tools::is_mutating(name) || github::is_mutating(name)
+    tools::is_mutating(name) || github::is_mutating(name) || skills::is_mutating(name)
 }
 
 pub(crate) fn emit_tool_event(
@@ -445,12 +446,23 @@ async fn run_turn_inner(
     // old sessions. The delegation addendum is only appended when the
     // subagent tool is actually in this session's tool list — no point
     // telling the model about a tool it can't see.
-    let system_prompt = if session.mode == "general" {
+        let system_prompt = if session.mode == "general" {
         prompts::GENERAL_SYSTEM_PROMPT.to_string()
-    } else if session.subagents_enabled {
-        format!("{}\n\n{}", prompts::CODING_SYSTEM_PROMPT, prompts::SUBAGENT_DELEGATION_ADDENDUM)
     } else {
-        prompts::CODING_SYSTEM_PROMPT.to_string()
+        // Skill authoring tools (create_skill/edit_skill/propose_skill) are
+        // unconditionally part of skills::tool_definitions(), so they're in
+        // this turn's tool list whenever coding mode is — the addendum
+        // explaining how to use them belongs here for the same reason
+        // SUBAGENT_DELEGATION_ADDENDUM is conditional on subagents_enabled.
+        let mut prompt = format!("{}
+
+{}", prompts::CODING_SYSTEM_PROMPT, prompts::SKILL_AUTHORING_ADDENDUM);
+        if session.subagents_enabled {
+            prompt = format!("{}
+
+{}", prompt, prompts::SUBAGENT_DELEGATION_ADDENDUM);
+        }
+        prompt
     };
 
     let tools_schema = if session.mode == "general" {
@@ -527,6 +539,12 @@ async fn run_turn_inner(
 
     let mut loop_detector = LoopDetector::new(20, 5);
     let mut step_count: u64 = 0;
+    // Every tool name called across every tool-round of this whole turn —
+    // separate from loop_detector's per-iteration call_signatures — so the
+    // end-of-turn reflection gate (see reflect::maybe_reflect) can tell
+    // whether *this turn as a whole* did anything worth reflecting on, not
+    // just its final tool-round.
+    let mut all_tool_names_this_turn: Vec<String> = Vec::new();
 
     loop {
         step_count += 1;
@@ -597,6 +615,20 @@ async fn run_turn_inner(
 
         if tool_calls.is_empty() {
             sessions::save(app_handle, &session);
+            // Reflection is a background housekeeping pass, not part of
+            // what the user is waiting on — spawn it detached so it can't
+            // add its own latency (a whole extra model round-trip) onto
+            // this turn's completion. It only ever writes to the proposal
+            // queue (see reflect::maybe_reflect), never anything the user
+            // is currently looking at, so there's nothing time-sensitive
+            // about it running a moment after agent://turn-end fires.
+            let reflect_app = app_handle.clone();
+            let reflect_cfg = cfg.clone();
+            let mut reflect_session = session.clone();
+            let reflect_tools = all_tool_names_this_turn.clone();
+            tokio::spawn(async move {
+                reflect::maybe_reflect(&reflect_app, &reflect_cfg, &mut reflect_session, &reflect_tools).await;
+            });
             return Ok(());
         }
 
@@ -613,6 +645,7 @@ async fn run_turn_inner(
             .await;
 
             call_signatures.push((call.function.name.clone(), call.function.arguments.clone()));
+            all_tool_names_this_turn.push(call.function.name.clone());
             session.messages.push(tool_msg);
         }
 

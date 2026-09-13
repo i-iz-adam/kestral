@@ -19,12 +19,20 @@ pub struct Session {
     pub workspace: String,
     /// Whether the agent has delegate_to_subagent available and is told to
     /// prefer it for bulky/exploratory work. Defaults to true (including
-    /// for sessions saved before this field existed) — sub-agents are the
+    /// for sessions saved before this field existed) Ã¢â‚¬â€ sub-agents are the
     /// default behavior, not an opt-in.
     #[serde(default = "default_true")]
     pub subagents_enabled: bool,
     pub messages: Vec<ChatMessage>,
     pub created_at: u64,
+    /// Counts turns since the last skill-distillation reflection pass (see
+    /// reflect.rs) â€” debounces it to roughly once every REFLECT_EVERY_N_TURNS
+    /// turns that did real (mutating/delegated) work, rather than running an
+    /// extra model call after every single turn. Defaults to 0 for sessions
+    /// saved before this field existed, which just means their next
+    /// qualifying turn or two count toward the first reflection as normal.
+    #[serde(default)]
+    pub turns_since_reflection: u32,
 }
 
 fn sessions_dir(app_handle: &tauri::AppHandle) -> PathBuf {
@@ -61,6 +69,7 @@ pub fn create(
         subagents_enabled,
         messages: vec![],
         created_at: now_ms(),
+        turns_since_reflection: 0,
     };
     save(app_handle, &session);
     session

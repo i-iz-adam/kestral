@@ -75,8 +75,8 @@ export interface TurnEndEventPayload {
   error?: string | null;
 }
 
-/** One entry in the session's chronological view — a chat bubble or a
- * top-level tool call — kept in a single array so render order always
+/** One entry in the session's chronological view â€” a chat bubble or a
+ * top-level tool call â€” kept in a single array so render order always
  * matches the order these actually happened in, instead of grouping all
  * messages before all tool calls regardless of when each occurred. */
 export type TimelineItem =
@@ -91,7 +91,7 @@ export type TimelineItem =
   | { kind: "tool"; key: string; callId: string };
 
 /** One entry in a session's *persisted* history, reconstructed from its
- * saved ChatMessage[] on load — a chat bubble or a top-level tool call.
+ * saved ChatMessage[] on load â€” a chat bubble or a top-level tool call.
  * Unlike TimelineItem (which looks tool state up from a live `liveCalls`
  * map so in-place status updates are cheap), a HistoryItem carries its
  * ToolCallEventPayload directly, since persisted calls are already
@@ -108,11 +108,36 @@ export interface OmniRouteConfigPayload {
 }
 
 export interface Skill {
+
   id: string;
+
+  name: string;
+
+  description: string;
+
+  source: "builtin" | "installed" | "learned";
+
+  enabled: boolean;
+
+  triggers: string[];
+
+  overridden: boolean;
+
+}
+
+
+export interface SkillProposal {
+  id: string;
+  kind: "create" | "update";
+  target_id: string | null;
   name: string;
   description: string;
-  source: "builtin" | "installed";
-  enabled: boolean;
+  content: string;
+  triggers: string[];
+  rationale: string;
+  previous_content: string | null;
+  based_on_session: string | null;
+  created_at: number;
 }
 
 export interface GithubIssue {
