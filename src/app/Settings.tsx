@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { open } from "@tauri-apps/api/dialog";
-import type { OmniRouteConfigPayload, Workspace } from "../types";
+import type { OmniRouteConfigPayload, SessionDefaults, Workspace } from "../types";
 
 export default function Settings() {
   const [mode, setMode] = useState<"local" | "remote">("local");
@@ -16,6 +16,10 @@ export default function Settings() {
   const [engineArgs, setEngineArgs] = useState("-y omniroute");
   const [engineAutoStart, setEngineAutoStart] = useState(true);
   const [engineSaved, setEngineSaved] = useState(false);
+
+  const [defaultPlanning, setDefaultPlanning] = useState(true);
+  const [defaultSubagents, setDefaultSubagents] = useState(true);
+  const [defaultsSaved, setDefaultsSaved] = useState(false);
 
   useEffect(() => {
     invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then(
@@ -34,6 +38,12 @@ export default function Settings() {
       setEngineCommand(cfg.command);
       setEngineArgs(cfg.args.join(" "));
       setEngineAutoStart(cfg.auto_start);
+    });
+    invoke<SessionDefaults>("get_session_defaults").then((defs) => {
+      if (defs) {
+        setDefaultPlanning(defs.planning_enabled ?? true);
+        setDefaultSubagents(defs.subagents_enabled ?? true);
+      }
     });
   }, []);
 
@@ -86,6 +96,17 @@ export default function Settings() {
     });
     setEngineSaved(true);
     setTimeout(() => setEngineSaved(false), 1500);
+  };
+
+  const saveDefaults = async () => {
+    await invoke("save_session_defaults", {
+      defaults: {
+        planning_enabled: defaultPlanning,
+        subagents_enabled: defaultSubagents,
+      },
+    });
+    setDefaultsSaved(true);
+    setTimeout(() => setDefaultsSaved(false), 1500);
   };
 
   return (
@@ -170,6 +191,38 @@ export default function Settings() {
           </button>
         </section>
       )}
+
+      <section>
+        <h3>Session defaults</h3>
+        <p className="hint small">
+          Default settings applied to newly created sessions.
+        </p>
+        <div className="field-group">
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={defaultPlanning}
+              onChange={(e) => setDefaultPlanning(e.target.checked)}
+            />
+            Planning mode by default (approve writes/commands)
+          </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={defaultSubagents}
+              onChange={(e) => setDefaultSubagents(e.target.checked)}
+            />
+            Use sub-agents by default to keep context clean
+          </label>
+        </div>
+        <button
+          className="primary"
+          onClick={saveDefaults}
+          style={{ marginTop: 10 }}
+        >
+          {defaultsSaved ? "Saved" : "Save"}
+        </button>
+      </section>
 
       <section>
         <h3>Workspaces</h3>

@@ -1,3 +1,8 @@
+export interface SessionDefaults {
+  planning_enabled: boolean;
+  subagents_enabled: boolean;
+}
+
 export interface ToolCall {
   id: string;
   type: string;
