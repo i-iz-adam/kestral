@@ -155,8 +155,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   };
 
-  const [justSent, setJustSent] = useState(false);
-
   const send = async () => {
     if (!input.trim() || sending) return;
     const text = input;
@@ -166,9 +164,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       runSlashCommand(text);
       return;
     }
-
-    setJustSent(true);
-    setTimeout(() => setJustSent(false), 400);
 
     markSendingStart(sessionId);
     // Errors surface via the global agent://turn-end listener (agentStore.ts)
@@ -443,11 +438,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
                 : "Ask anything..."
             }
           />
-          <button
-            className={"primary" + (sending ? " sending" : "") + (justSent ? " sent" : "")}
-            onClick={send}
-            disabled={sending}
-          >
+          <button className={"primary" + (sending ? " sending" : "")} onClick={send} disabled={sending}>
             {sending ? "Working" : "Send"}
           </button>
         </div>
