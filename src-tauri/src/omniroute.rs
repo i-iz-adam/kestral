@@ -1,8 +1,30 @@
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
 
 use crate::config::OmniRouteConfig;
+
+/// Retry policy for the model call itself. There's already 429-handling
+/// for web_search/web_fetch and a 401/403-retry-without-auth for the main
+/// request (see fetch_endpoint), but nothing covered a plain transient
+/// failure — a network blip, a 5xx, a rate limit — on the chat completion
+/// call, which for a long-running multi-hour session is long enough to hit
+/// eventually and, uncovered, kills the whole turn over what's usually a
+/// momentary problem. Retries only ever happen before anything from the
+/// response has been used (no success status yet for chat_completion; no
+/// delta emitted yet for chat_completion_stream) — once real content is in
+/// play, retrying would mean silently resending the request and risking
+/// duplicated/confusing output, so at that point an error is just an error.
+const MAX_RETRIES: u32 = 3;
+
+fn is_retryable_status(status: u16) -> bool {
+    matches!(status, 429 | 500 | 502 | 503 | 504)
+}
+
+fn backoff_delay(attempt: u32) -> Duration {
+    Duration::from_millis(500 * 2u64.saturating_pow(attempt))
+}
 
 /// OpenAI-compatible chat message. `content` is optional because an
 /// assistant message that only carries tool_calls has no text content.
@@ -249,45 +271,64 @@ pub async fn chat_completion(
         body["tools"] = t.clone();
     }
 
-    let client = reqwest::Client::new();
-    let mut req = client.post(&url).json(&body);
-    if let Some(key) = &cfg.api_key {
-        if !key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", key));
+    let mut attempt = 0u32;
+    loop {
+        let client = reqwest::Client::new();
+        let mut req = client.post(&url).json(&body);
+        if let Some(key) = &cfg.api_key {
+            if !key.is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", key));
+            }
         }
-    }
 
-    let resp = req.send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("OmniRoute returned {}: {}", status, text));
-    }
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                if attempt < MAX_RETRIES {
+                    tokio::time::sleep(backoff_delay(attempt)).await;
+                    attempt += 1;
+                    continue;
+                }
+                return Err(format!("Failed to connect to OmniRoute: {}", e));
+            }
+        };
 
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-    if text.trim().is_empty() {
-        return Err(
-            "OmniRoute returned success with an empty response body (expected JSON)".to_string(),
-        );
+        if !resp.status().is_success() {
+            let status = resp.status();
+            if is_retryable_status(status.as_u16()) && attempt < MAX_RETRIES {
+                tokio::time::sleep(backoff_delay(attempt)).await;
+                attempt += 1;
+                continue;
+            }
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("OmniRoute returned {}: {}", status, text));
+        }
+
+        let text = resp.text().await.map_err(|e| e.to_string())?;
+        if text.trim().is_empty() {
+            return Err(
+                "OmniRoute returned success with an empty response body (expected JSON)".to_string(),
+            );
+        }
+        // OmniRoute may return SSE (`data: {...}` chunks) even when
+        // `stream: false` is sent — handle both shapes.
+        let trimmed = text.trim_start();
+        if trimmed.starts_with("data:") {
+            return parse_sse_response(&text);
+        }
+        let json: Value = serde_json::from_str(&text).map_err(|e| {
+            let preview: String = text.chars().take(500).collect();
+            format!("error decoding response body: {} (preview: {:?})", e, preview)
+        })?;
+        let choice = json
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .ok_or("No choices in OmniRoute response")?;
+        let message = choice
+            .get("message")
+            .ok_or("No message in OmniRoute response choice")?;
+        return serde_json::from_value(message.clone()).map_err(|e| e.to_string());
     }
-    // OmniRoute may return SSE (`data: {...}` chunks) even when
-    // `stream: false` is sent — handle both shapes.
-    let trimmed = text.trim_start();
-    if trimmed.starts_with("data:") {
-        return parse_sse_response(&text);
-    }
-    let json: Value = serde_json::from_str(&text).map_err(|e| {
-        let preview: String = text.chars().take(500).collect();
-        format!("error decoding response body: {} (preview: {:?})", e, preview)
-    })?;
-    let choice = json
-        .get("choices")
-        .and_then(|c| c.get(0))
-        .ok_or("No choices in OmniRoute response")?;
-    let message = choice
-        .get("message")
-        .ok_or("No message in OmniRoute response choice")?;
-    serde_json::from_value(message.clone()).map_err(|e| e.to_string())
 }
 
 /// Sends one chat completion request with `stream: true` and invokes
@@ -320,20 +361,40 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
         body["tools"] = t.clone();
     }
 
-    let client = reqwest::Client::new();
-    let mut req = client.post(&url).json(&body);
-    if let Some(key) = &cfg.api_key {
-        if !key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", key));
-        }
-    }
+    let resp = {
+        let mut attempt = 0u32;
+        loop {
+            let client = reqwest::Client::new();
+            let mut req = client.post(&url).json(&body);
+            if let Some(key) = &cfg.api_key {
+                if !key.is_empty() {
+                    req = req.header("Authorization", format!("Bearer {}", key));
+                }
+            }
 
-    let resp = req.send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("OmniRoute returned {}: {}", status, text));
-    }
+            match req.send().await {
+                Ok(r) if r.status().is_success() => break r,
+                Ok(r) => {
+                    let status = r.status();
+                    if is_retryable_status(status.as_u16()) && attempt < MAX_RETRIES {
+                        tokio::time::sleep(backoff_delay(attempt)).await;
+                        attempt += 1;
+                        continue;
+                    }
+                    let text = r.text().await.unwrap_or_default();
+                    return Err(format!("OmniRoute returned {}: {}", status, text));
+                }
+                Err(e) => {
+                    if attempt < MAX_RETRIES {
+                        tokio::time::sleep(backoff_delay(attempt)).await;
+                        attempt += 1;
+                        continue;
+                    }
+                    return Err(format!("Failed to connect to OmniRoute: {}", e));
+                }
+            }
+        }
+    };
 
     let mut content = String::new();
     let mut tool_acc: ToolAcc = Vec::new();
