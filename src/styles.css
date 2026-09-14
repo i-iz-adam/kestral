@@ -35,6 +35,146 @@
   box-sizing: border-box;
 }
 
+/* ---- App Layout & Custom Titlebar ---- */
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.titlebar {
+  height: 36px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  flex-shrink: 0;
+  z-index: 9999;
+  position: relative;
+  -webkit-app-region: drag;
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  height: 100%;
+  -webkit-app-region: drag;
+}
+
+.titlebar-logo {
+  transition: transform 0.3s var(--ease-spring), filter 0.3s var(--ease);
+}
+
+.titlebar-brand:hover .titlebar-logo {
+  transform: rotate(12deg) scale(1.1);
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+
+.titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.titlebar-center {
+  flex: 1;
+  height: 100%;
+  -webkit-app-region: drag;
+}
+
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+/* Individual Window Control Button Base */
+.titlebar-btn {
+  background: transparent;
+  border: none;
+  outline: none;
+  width: 44px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  cursor: pointer;
+  position: relative;
+  -webkit-app-region: no-drag;
+  transition: color 0.2s var(--ease), background-color 0.2s var(--ease), box-shadow 0.2s var(--ease), transform 0.15s var(--ease-spring);
+}
+
+.titlebar-btn .btn-icon {
+  transition: transform 0.25s var(--ease-spring), stroke 0.2s var(--ease), fill 0.2s var(--ease);
+}
+
+/* Minimize Button Animation */
+.titlebar-btn.minimize:hover {
+  background: var(--surface-2);
+  color: var(--accent-soft);
+  box-shadow: inset 0 -2px 0 0 var(--accent), 0 0 12px -2px var(--accent-glow);
+}
+
+.titlebar-btn.minimize:hover .btn-icon {
+  transform: translateY(2px) scaleX(1.2);
+}
+
+.titlebar-btn.minimize:active {
+  transform: scale(0.9) translateY(1px);
+}
+
+/* Maximize / Restore Button Animation */
+.titlebar-btn.maximize:hover {
+  background: var(--surface-2);
+  color: var(--gold);
+  box-shadow: inset 0 -2px 0 0 var(--gold), 0 0 12px -2px var(--gold-glow);
+}
+
+.titlebar-btn.maximize:hover .btn-icon {
+  transform: scale(1.25);
+}
+
+.titlebar-btn.maximize:active {
+  transform: scale(0.9);
+}
+
+/* Close Button Animation */
+.titlebar-btn.close:hover {
+  background: rgba(242, 102, 90, 0.22);
+  color: #fca5a5;
+  box-shadow: inset 0 -2px 0 0 var(--danger), 0 0 14px rgba(242, 102, 90, 0.45);
+}
+
+.titlebar-btn.close:hover .btn-icon {
+  transform: rotate(90deg) scale(1.15);
+}
+
+.titlebar-btn.close:active {
+  background: rgba(242, 102, 90, 0.38);
+  transform: rotate(90deg) scale(0.92);
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;

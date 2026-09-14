@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import Wizard from "./setup/Wizard";
 import AppShell from "./app/AppShell";
+import Titlebar from "./app/Titlebar";
 import type { SetupStepDef } from "./setup/types";
 import { ensureAgentEventsStarted } from "./app/agentStore";
 
@@ -23,13 +24,18 @@ export default function App() {
       .finally(() => setChecking(false));
   }, []);
 
-  if (checking) {
-    return <div className="loading-screen">Loading...</div>;
-  }
-
-  if (needsSetup) {
-    return <Wizard onFinished={() => setNeedsSetup(false)} />;
-  }
-
-  return <AppShell />;
+  return (
+    <div className="app-container">
+      <Titlebar />
+      <div className="app-body">
+        {checking ? (
+          <div className="loading-screen">Loading...</div>
+        ) : needsSetup ? (
+          <Wizard onFinished={() => setNeedsSetup(false)} />
+        ) : (
+          <AppShell />
+        )}
+      </div>
+    </div>
+  );
 }
