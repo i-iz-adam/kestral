@@ -434,7 +434,8 @@ pub(crate) async fn execute_tool(
         // execute_tool -> subagent::run -> handle_tool_call -> execute_tool.
         return Box::pin(subagent::run(app_handle, approvals, stops, stop_flag, session, call_id, task)).await;
     }
-    if let Some(result) = skills::maybe_execute(app_handle, name, args) {
+    let workspace = if session.workspace.trim().is_empty() { None } else { Some(session.workspace.as_str()) };
+    if let Some(result) = skills::maybe_execute(app_handle, name, args, workspace) {
         return result;
     }
     if name.starts_with("github_") {
@@ -659,13 +660,29 @@ async fn run_turn_inner(
     // stays present through however many tool rounds the turn takes.
     // Deduplicated per session context so each unique skill is auto-loaded
     // into context only once.
+    let workspace = if session.workspace.trim().is_empty() { None } else { Some(session.workspace.as_str()) };
     let mut skill_messages: Vec<ChatMessage> = Vec::new();
     if session.mode != "general" {
         let mut loaded_skill_ids = skills::get_loaded_skill_ids(&session);
 
-        for skill in skills::find_relevant(app_handle, &user_message) {
+        // Keyword matching is the free, instant fast-path (see
+        // skills::find_relevant); anything it doesn't catch — a
+        // paraphrase, a synonym, a skill whose triggers just don't happen
+        // to overlap with how this was phrased — falls to a judgment call
+        // by the fast/cheap model instead, the same one session-title
+        // generation and reflection use. This is the actual fix for
+        // "keyword-only auto-loading misses real matches": the model
+        // decides relevance the way a person skimming list_skills would,
+        // rather than a fixed word list having to predict every phrasing
+        // in advance.
+        let mut matched: Vec<skills::Skill> = skills::find_relevant(app_handle, &user_message, workspace);
+        let already: std::collections::HashSet<String> =
+            matched.iter().map(|s| s.id.clone()).chain(loaded_skill_ids.iter().cloned()).collect();
+        matched.extend(skills::find_relevant_ai(app_handle, &cfg, workspace, &user_message, &already).await);
+
+        for skill in matched {
             if !loaded_skill_ids.contains(&skill.id) {
-                if skills::get_content(app_handle, &skill.id).is_some() {
+                if skills::get_content(app_handle, &skill.id, workspace).is_some() {
                     emit_skill_loaded(app_handle, session_id, &skill);
                     let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
                     let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
@@ -684,16 +701,31 @@ async fn run_turn_inner(
             }
         }
 
-        let all_skills = skills::list(app_handle);
+        let all_skills = skills::list(app_handle, workspace);
         for id in &loaded_skill_ids {
             if let Some(skill_info) = all_skills.iter().find(|s| &s.id == id) {
-                if let Some(content) = skills::get_content(app_handle, id) {
+                if let Some(content) = skills::get_content(app_handle, id, workspace) {
                     skill_messages.push(ChatMessage {
                         role: "system".into(),
                         content: Some(format!("Relevant skill — {}:\n\n{}", skill_info.name, content)),
                         ..Default::default()
                     });
                 }
+            }
+        }
+
+        // AGENTS.md is standing, unconditional project context — unlike a
+        // skill, it isn't keyword- or AI-matched into relevance, it's just
+        // always there for a workspace that has one, the same convention
+        // other coding agents follow (and the built-in "agents-md" skill
+        // covers how to write a good one).
+        if let Some(ws) = workspace {
+            if let Some(agents_md) = skills::read_agents_md(ws) {
+                skill_messages.push(ChatMessage {
+                    role: "system".into(),
+                    content: Some(format!("This project's AGENTS.md:\n\n{}", agents_md)),
+                    ..Default::default()
+                });
             }
         }
     }

@@ -117,7 +117,7 @@ export interface Skill {
 
   description: string;
 
-  source: "builtin" | "installed" | "learned";
+  source: "builtin" | "installed" | "learned" | "project";
 
   enabled: boolean;
 

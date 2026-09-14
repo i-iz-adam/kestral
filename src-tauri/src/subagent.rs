@@ -67,10 +67,14 @@ pub(crate) async fn run(
     // the parser" should get the testing skill without needing to
     // remember list_skills/read_skill exist any more than the parent does.
     // Each unique skill is loaded into the sub-agent context at most once.
+    let workspace = if session.workspace.trim().is_empty() { None } else { Some(session.workspace.as_str()) };
     let mut subagent_loaded_skills = std::collections::HashSet::new();
-    for skill in skills::find_relevant(app_handle, task) {
+    let mut subagent_matched = skills::find_relevant(app_handle, task, workspace);
+    let already: std::collections::HashSet<String> = subagent_matched.iter().map(|s| s.id.clone()).collect();
+    subagent_matched.extend(skills::find_relevant_ai(app_handle, &cfg, workspace, task, &already).await);
+    for skill in subagent_matched {
         if subagent_loaded_skills.insert(skill.id.clone()) {
-            if let Some(content) = skills::get_content(app_handle, &skill.id) {
+            if let Some(content) = skills::get_content(app_handle, &skill.id, workspace) {
                 agent::emit_skill_loaded(app_handle, &session.id, &skill);
                 messages.push(ChatMessage {
                     role: "system".into(),
@@ -78,6 +82,15 @@ pub(crate) async fn run(
                     ..Default::default()
                 });
             }
+        }
+    }
+    if let Some(ws) = workspace {
+        if let Some(agents_md) = skills::read_agents_md(ws) {
+            messages.push(ChatMessage {
+                role: "system".into(),
+                content: Some(format!("This project's AGENTS.md:\n\n{}", agents_md)),
+                ..Default::default()
+            });
         }
     }
 

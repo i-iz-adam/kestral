@@ -152,7 +152,7 @@ pub(crate) async fn maybe_reflect(
         return;
     }
 
-    let skill_list = skills::list(app_handle)
+    let skill_list = skills::list(app_handle, None)
         .into_iter()
         .filter(|s| s.enabled)
         .map(|s| format!("- {} ({}): {}", s.id, s.source, s.description))
@@ -200,7 +200,7 @@ pub(crate) async fn maybe_reflect(
     let previous_content = parsed
         .target_id
         .as_deref()
-        .and_then(|id| skills::get_content(app_handle, id));
+        .and_then(|id| skills::get_content(app_handle, id, None));
 
     let proposal = SkillProposal {
         id: uuid::Uuid::new_v4().to_string(),

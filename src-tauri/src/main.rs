@@ -300,13 +300,13 @@ async fn github_action(
 // ---- skills ----
 
 #[tauri::command]
-fn list_skills(app_handle: tauri::AppHandle) -> Vec<skills::Skill> {
-    skills::list(&app_handle)
+fn list_skills(app_handle: tauri::AppHandle, workspace: Option<String>) -> Vec<skills::Skill> {
+    skills::list(&app_handle, workspace.as_deref())
 }
 
 #[tauri::command]
-fn get_skill_content(app_handle: tauri::AppHandle, id: String) -> Option<String> {
-    skills::get_content(&app_handle, &id)
+fn get_skill_content(app_handle: tauri::AppHandle, id: String, workspace: Option<String>) -> Option<String> {
+    skills::get_content(&app_handle, &id, workspace.as_deref())
 }
 
 #[tauri::command]
@@ -315,8 +315,15 @@ fn toggle_skill(app_handle: tauri::AppHandle, id: String, enabled: bool) {
 }
 
 #[tauri::command]
-fn delete_skill(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
-    skills::delete(&app_handle, &id)
+fn delete_skill(app_handle: tauri::AppHandle, id: String, workspace: Option<String>) -> Result<(), String> {
+    skills::delete(&app_handle, &id, workspace.as_deref())
+}
+
+/// Whether the given workspace has an AGENTS.md at its root, and its
+/// content if so — backs the Skills panel's AGENTS.md card.
+#[tauri::command]
+fn get_agents_md(workspace: String) -> Option<String> {
+    skills::read_agents_md(&workspace)
 }
 
 #[tauri::command]
@@ -339,8 +346,19 @@ fn create_skill(
     description: String,
     content: String,
     triggers: Vec<String>,
+    workspace: Option<String>,
+    project: Option<bool>,
 ) -> Result<skills::Skill, String> {
-    skills::write_skill(&app_handle, id.as_deref(), &name, &description, &content, &triggers)
+    skills::write_skill(
+        &app_handle,
+        id.as_deref(),
+        &name,
+        &description,
+        &content,
+        &triggers,
+        workspace.as_deref(),
+        project.unwrap_or(false),
+    )
 }
 
 #[derive(serde::Deserialize)]
@@ -356,12 +374,13 @@ fn edit_skill(
     app_handle: tauri::AppHandle,
     id: String,
     edits: Vec<SkillEditInput>,
+    workspace: Option<String>,
 ) -> Result<String, String> {
     let parsed: Vec<(String, String, bool)> = edits
         .into_iter()
         .map(|e| (e.old_string, e.new_string, e.replace_all))
         .collect();
-    skills::edit_skill(&app_handle, &id, &parsed)
+    skills::edit_skill(&app_handle, &id, &parsed, workspace.as_deref())
 }
 
 // ---- skill proposals (the reviewed half of the self-improvement loop) ----
@@ -502,6 +521,7 @@ fn main() {
             github_action,
             list_skills,
             get_skill_content,
+            get_agents_md,
             toggle_skill,
             delete_skill,
             install_skill_from_url,

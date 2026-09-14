@@ -100,6 +100,7 @@ fn builtin_skills() -> Vec<BuiltinSkill> {
         ("pptx", "pptx", "PowerPoint creation, editing, and analysis.", include_str!("../skills_builtin/pptx/SKILL.md")),
         ("xlsx", "xlsx", "Spreadsheet creation, editing, and analysis.", include_str!("../skills_builtin/xlsx/SKILL.md")),
         ("skill-creator", "Skill creator", "In-depth methodology for writing, editing, and improving skills — read this before authoring or updating one.", include_str!("../skills_builtin/skill-creator/SKILL.md")),
+        ("agents-md", "AGENTS.md authoring", "How to write, structure, and maintain a project's AGENTS.md — the per-repo instructions file Kestrel (and other coding agents) reads automatically.", include_str!("../skills_builtin/agents-md.md")),
     ];
 
     raw_builtins
@@ -186,6 +187,49 @@ fn override_path(app_handle: &tauri::AppHandle, id: &str) -> PathBuf {
 /// ever returned by list(), get_content(), or find_relevant(), so a
 /// proposal has zero effect on any running session until a human calls
 /// accept_proposal.
+/// Where a workspace's own skills live: `<workspace>/.kestrel/skills/`,
+/// read with exactly the same folder/`.md`/`.json` formats as the global
+/// skills_dir() — the only difference is *where* it's rooted. Living
+/// inside the workspace (not the app's config dir) is the point: a
+/// project skill travels with the repo through git, so "how we deploy
+/// this specific project" can be committed and shared the same way
+/// AGENTS.md is, rather than living only on one person's machine.
+/// Returns None for an empty/missing workspace path rather than creating
+/// a stray `.kestrel` next to the app binary or in the cwd.
+fn project_skills_dir(workspace: &str) -> Option<PathBuf> {
+    if workspace.trim().is_empty() {
+        return None;
+    }
+    let root = PathBuf::from(workspace);
+    if !root.is_dir() {
+        return None;
+    }
+    let dir = root.join(".kestrel").join("skills");
+    fs::create_dir_all(&dir).ok();
+    Some(dir)
+}
+
+/// The conventional per-project instructions file a growing number of
+/// coding agents (this one included) look for at a workspace's root —
+/// see the built-in "agents-md" skill for what belongs in it. Kept as a
+/// tiny helper rather than inlined so read_agents_md/agent.rs's context
+/// injection and any future write path share one definition of where it
+/// lives.
+pub fn agents_md_path(workspace: &str) -> Option<PathBuf> {
+    if workspace.trim().is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(workspace).join("AGENTS.md"))
+}
+
+/// Reads a workspace's AGENTS.md if one exists. Used both by the agent
+/// loop (to fold it into system context every turn, unconditionally —
+/// this is standing project instruction, not a keyword-matched skill) and
+/// by the UI (to show whether one exists yet).
+pub fn read_agents_md(workspace: &str) -> Option<String> {
+    fs::read_to_string(agents_md_path(workspace)?).ok()
+}
+
 fn proposals_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
         .path_resolver()
@@ -217,7 +261,92 @@ fn save_state(app_handle: &tauri::AppHandle, state: &SkillState) {
     }
 }
 
-pub fn list(app_handle: &tauri::AppHandle) -> Vec<Skill> {
+/// Scans one skills directory (same folder/`.md`/`.json` formats as the
+/// global skills_dir) and appends whatever it finds to `out`, skipping
+/// any id already present — shared between the global-library scan and
+/// the project-library scan in list() so both read exactly the same
+/// on-disk shapes. `default_source` is what an entry gets when its own
+/// frontmatter/JSON doesn't specify an `origin` — "installed" for the
+/// global dir (existing behavior, unchanged), "project" for a workspace's
+/// `.kestrel/skills/`.
+fn scan_skills_dir(dir: &PathBuf, state: &SkillState, default_source: &str, out: &mut Vec<Skill>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if path.file_name().and_then(|n| n.to_str()) == Some("overrides") {
+                continue;
+            }
+            let skill_md = path.join("SKILL.md");
+            if skill_md.is_file() {
+                if let Ok(data) = fs::read_to_string(&skill_md) {
+                    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+                    let fm = parse_frontmatter(&data);
+                    let name = if !fm.name.is_empty() && fm.name != "Untitled skill" { fm.name } else { dir_name.to_string() };
+                    let id = dir_name.to_string();
+                    if !out.iter().any(|s| s.id == id) {
+                        out.push(Skill {
+                            id: id.clone(),
+                            name,
+                            description: fm.description,
+                            source: if fm.origin.is_empty() { default_source.to_string() } else { fm.origin },
+                            enabled: !state.disabled.contains(&id),
+                            triggers: fm.triggers,
+                            overridden: false,
+                        });
+                    }
+                }
+            }
+        } else if path.is_file() {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if file_name.ends_with(".json") {
+                if let Ok(data) = fs::read_to_string(&path) {
+                    if let Ok(file) = serde_json::from_str::<InstalledSkillFile>(&data) {
+                        if !out.iter().any(|s| s.id == file.id) {
+                            out.push(Skill {
+                                id: file.id.clone(),
+                                name: file.name,
+                                description: file.description,
+                                source: file.origin.clone(),
+                                enabled: !state.disabled.contains(&file.id),
+                                triggers: file.triggers.clone(),
+                                overridden: false,
+                            });
+                        }
+                    }
+                }
+            } else if file_name.ends_with(".md") {
+                let id = file_name.trim_end_matches(".md").to_string();
+                if let Ok(data) = fs::read_to_string(&path) {
+                    let fm = parse_frontmatter(&data);
+                    let name = if !fm.name.is_empty() && fm.name != "Untitled skill" { fm.name } else { id.clone() };
+                    if !out.iter().any(|s| s.id == id) {
+                        out.push(Skill {
+                            id: id.clone(),
+                            name,
+                            description: fm.description,
+                            source: if fm.origin.is_empty() { default_source.to_string() } else { fm.origin },
+                            enabled: !state.disabled.contains(&id),
+                            triggers: fm.triggers,
+                            overridden: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// `workspace`, when given, additionally surfaces that project's own
+/// `.kestrel/skills/` library (source "project") — scanned right after
+/// builtins and before the global installed/learned library, so a
+/// project skill's id takes precedence over a same-id global one (the
+/// dedup in scan_skills_dir skips anything list() already contains). A
+/// project skill can't shadow a builtin the same way — that still goes
+/// through the override mechanism — but shadowing the general skill
+/// library is exactly the "this project's way of doing it" case a
+/// project-scoped skill exists for.
+pub fn list(app_handle: &tauri::AppHandle, workspace: Option<&str>) -> Vec<Skill> {
     let state = load_state(app_handle);
     let mut out = vec![];
 
@@ -247,90 +376,18 @@ pub fn list(app_handle: &tauri::AppHandle) -> Vec<Skill> {
         });
     }
 
-    if let Ok(entries) = fs::read_dir(skills_dir(app_handle)) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            // "overrides" holds builtin overrides, already folded into the
-            // builtin entries above — never list it as its own skill.
-            if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("overrides") {
-                continue;
-            }
-            if path.is_dir() {
-                let skill_md = path.join("SKILL.md");
-                if skill_md.is_file() {
-                    if let Ok(data) = fs::read_to_string(&skill_md) {
-                        let dir_name = path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("unknown");
-                        let fm = parse_frontmatter(&data);
-                        let name = if !fm.name.is_empty() && fm.name != "Untitled skill" {
-                            fm.name
-                        } else {
-                            dir_name.to_string()
-                        };
-                        let id = dir_name.to_string();
-                        if !out.iter().any(|s| s.id == id) {
-                            out.push(Skill {
-                                id: id.clone(),
-                                name,
-                                description: fm.description,
-                                source: if fm.origin.is_empty() { "installed".to_string() } else { fm.origin },
-                                enabled: !state.disabled.contains(&id),
-                                triggers: fm.triggers,
-                                overridden: false,
-                            });
-                        }
-                    }
-                }
-            } else if path.is_file() {
-                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if file_name.ends_with(".json") {
-                    if let Ok(data) = fs::read_to_string(&path) {
-                        if let Ok(file) = serde_json::from_str::<InstalledSkillFile>(&data) {
-                            if !out.iter().any(|s| s.id == file.id) {
-                                out.push(Skill {
-                                    id: file.id.clone(),
-                                    name: file.name,
-                                    description: file.description,
-                                    source: file.origin.clone(),
-                                    enabled: !state.disabled.contains(&file.id),
-                                    triggers: file.triggers.clone(),
-                                    overridden: false,
-                                });
-                            }
-                        }
-                    }
-                } else if file_name.ends_with(".md") {
-                    let id = file_name.trim_end_matches(".md").to_string();
-                    if let Ok(data) = fs::read_to_string(&path) {
-                        let fm = parse_frontmatter(&data);
-                        let name = if !fm.name.is_empty() && fm.name != "Untitled skill" {
-                            fm.name
-                        } else {
-                            id.clone()
-                        };
-                        if !out.iter().any(|s| s.id == id) {
-                            out.push(Skill {
-                                id: id.clone(),
-                                name,
-                                description: fm.description,
-                                source: if fm.origin.is_empty() { "installed".to_string() } else { fm.origin },
-                                enabled: !state.disabled.contains(&id),
-                                triggers: fm.triggers,
-                                overridden: false,
-                            });
-                        }
-                    }
-                }
-            }
+    if let Some(ws) = workspace {
+        if let Some(dir) = project_skills_dir(ws) {
+            scan_skills_dir(&dir, &state, "project", &mut out);
         }
     }
+
+    scan_skills_dir(&skills_dir(app_handle), &state, "installed", &mut out);
 
     out
 }
 
-pub fn get_content(app_handle: &tauri::AppHandle, id: &str) -> Option<String> {
+pub fn get_content(app_handle: &tauri::AppHandle, id: &str, workspace: Option<&str>) -> Option<String> {
     // An override, if present, wins over everything else — including a
     // compiled-in builtin. This is the mechanism that lets edit_skill
     // "edit" a builtin without a rebuild: the first edit copies the
@@ -342,6 +399,33 @@ pub fn get_content(app_handle: &tauri::AppHandle, id: &str) -> Option<String> {
     }
     if let Some(b) = builtin_skills().into_iter().find(|b| b.id == id) {
         return Some(b.content);
+    }
+    // A project skill (from this workspace's .kestrel/skills/) is checked
+    // before the global library, same precedence as list() — an id that
+    // exists in both resolves to the project's version.
+    if let Some(ws) = workspace {
+        if let Some(dir) = project_skills_dir(ws) {
+            let folder_skill = dir.join(id).join("SKILL.md");
+            if folder_skill.is_file() {
+                if let Ok(data) = fs::read_to_string(folder_skill) {
+                    return Some(parse_frontmatter(&data).body);
+                }
+            }
+            let json_path = dir.join(format!("{}.json", id));
+            if json_path.is_file() {
+                if let Ok(data) = fs::read_to_string(json_path) {
+                    if let Ok(file) = serde_json::from_str::<InstalledSkillFile>(&data) {
+                        return Some(file.content);
+                    }
+                }
+            }
+            let md_path = dir.join(format!("{}.md", id));
+            if md_path.is_file() {
+                if let Ok(data) = fs::read_to_string(md_path) {
+                    return Some(parse_frontmatter(&data).body);
+                }
+            }
+        }
     }
     // Check directory with SKILL.md (folder-based installed/learned skill)
     let folder_skill = skills_dir(app_handle).join(id).join("SKILL.md");
@@ -378,7 +462,7 @@ pub fn toggle(app_handle: &tauri::AppHandle, id: &str, enabled: bool) {
     save_state(app_handle, &state);
 }
 
-pub fn delete(app_handle: &tauri::AppHandle, id: &str) -> Result<(), String> {
+pub fn delete(app_handle: &tauri::AppHandle, id: &str, workspace: Option<&str>) -> Result<(), String> {
     // A builtin itself can't be deleted, but an override on top of one can
     // — that's just "revert to the original", not "remove the skill".
     let override_file = override_path(app_handle, id);
@@ -387,6 +471,20 @@ pub fn delete(app_handle: &tauri::AppHandle, id: &str) -> Result<(), String> {
     }
     if builtin_skills().iter().any(|b| b.id == id) {
         return Err("Built-in skills can be disabled but not deleted".into());
+    }
+    if let Some(dir) = workspace.and_then(project_skills_dir) {
+        let folder = dir.join(id);
+        if folder.is_dir() {
+            return fs::remove_dir_all(folder).map_err(|e| e.to_string());
+        }
+        let json_path = dir.join(format!("{}.json", id));
+        if json_path.is_file() {
+            return fs::remove_file(json_path).map_err(|e| e.to_string());
+        }
+        let md_path = dir.join(format!("{}.md", id));
+        if md_path.is_file() {
+            return fs::remove_file(md_path).map_err(|e| e.to_string());
+        }
     }
     let dir = skills_dir(app_handle).join(id);
     if dir.is_dir() {
@@ -547,8 +645,8 @@ fn slugify(name: &str) -> String {
 /// installed, or learned) — appending a short uuid suffix if the plain
 /// slug is already taken, rather than silently overwriting an unrelated
 /// skill that happens to have a similar name.
-fn unique_id(app_handle: &tauri::AppHandle, preferred: &str) -> String {
-    let existing = list(app_handle);
+fn unique_id(app_handle: &tauri::AppHandle, preferred: &str, workspace: Option<&str>) -> String {
+    let existing = list(app_handle, workspace);
     if !existing.iter().any(|s| s.id == preferred) {
         return preferred.to_string();
     }
@@ -575,6 +673,12 @@ fn render_skill_md(name: &str, description: &str, triggers: &[String], origin: &
 /// now, or from the agent's own create_skill/edit_skill tool calls when
 /// planning mode is off (or the human approves it, when on — both tools
 /// are marked mutating, see agent::is_mutating).
+/// `workspace` + `project: true` routes a brand-new skill into that
+/// workspace's `.kestrel/skills/` instead of the app's global skills
+/// dir — irrelevant for updates to an existing skill (its on-disk
+/// location, wherever that is, wins) and irrelevant for a builtin id
+/// (always an override, same as before; project scope doesn't apply to
+/// overriding compiled-in content).
 pub fn write_skill(
     app_handle: &tauri::AppHandle,
     id: Option<&str>,
@@ -582,6 +686,8 @@ pub fn write_skill(
     description: &str,
     content: &str,
     triggers: &[String],
+    workspace: Option<&str>,
+    project: bool,
 ) -> Result<Skill, String> {
     if name.trim().is_empty() {
         return Err("name cannot be empty".into());
@@ -607,10 +713,30 @@ pub fn write_skill(
         });
     }
 
-    let already_exists = id.map(|i| list(app_handle).iter().any(|s| s.id == i)).unwrap_or(false);
+    let already_exists = id.map(|i| list(app_handle, workspace).iter().any(|s| s.id == i)).unwrap_or(false);
     let resolved_id = match id {
         Some(existing) => existing.to_string(),
-        None => unique_id(app_handle, &slugify(name)),
+        None => unique_id(app_handle, &slugify(name), workspace),
+    };
+
+    // Where this write lands: an update to an id that already lives in
+    // the project library stays there regardless of the `project` flag
+    // (editing shouldn't relocate a skill); a brand-new skill goes to the
+    // project dir only when explicitly asked for one and a real workspace
+    // is available, otherwise falls back to the global dir the same as
+    // before this existed.
+    let project_dir = workspace.and_then(project_skills_dir);
+    let existing_lives_in_project = already_exists
+        && project_dir.as_ref().map(|dir| {
+            dir.join(&resolved_id).join("SKILL.md").is_file()
+                || dir.join(format!("{}.json", resolved_id)).is_file()
+                || dir.join(format!("{}.md", resolved_id)).is_file()
+        }).unwrap_or(false);
+    let is_project = existing_lives_in_project || (!already_exists && project);
+    let target_dir = if is_project {
+        project_dir.ok_or_else(|| "no workspace is active — project-scoped skills need an open workspace".to_string())?
+    } else {
+        skills_dir(app_handle)
     };
 
     // If this id already exists as a JSON-format installed skill (the
@@ -619,15 +745,15 @@ pub fn write_skill(
     // would then have two on-disk entries claiming the same id, and only
     // one of them would actually reflect the edit. New skills, and skills
     // that already exist in folder form, use the folder format.
-    let json_path = skills_dir(app_handle).join(format!("{}.json", resolved_id));
+    let json_path = target_dir.join(format!("{}.json", resolved_id));
     let existing_origin = if already_exists {
-        list(app_handle).into_iter().find(|s| s.id == resolved_id).map(|s| s.source)
+        list(app_handle, workspace).into_iter().find(|s| s.id == resolved_id).map(|s| s.source)
     } else {
         None
     };
-    let origin = existing_origin.unwrap_or_else(|| "learned".to_string());
+    let origin = existing_origin.unwrap_or_else(|| if is_project { "project".to_string() } else { "learned".to_string() });
 
-    let md_path = skills_dir(app_handle).join(format!("{}.md", resolved_id));
+    let md_path = target_dir.join(format!("{}.md", resolved_id));
 
     if json_path.is_file() {
         let file = InstalledSkillFile {
@@ -644,7 +770,7 @@ pub fn write_skill(
         let rendered = render_skill_md(name, description, triggers, &origin, content);
         fs::write(&md_path, rendered).map_err(|e| e.to_string())?;
     } else {
-        let dir = skills_dir(app_handle).join(&resolved_id);
+        let dir = target_dir.join(&resolved_id);
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let rendered = render_skill_md(name, description, triggers, &origin, content);
         fs::write(dir.join("SKILL.md"), rendered).map_err(|e| e.to_string())?;
@@ -671,12 +797,13 @@ pub fn edit_skill(
     app_handle: &tauri::AppHandle,
     id: &str,
     edits: &[(String, String, bool)],
+    workspace: Option<&str>,
 ) -> Result<String, String> {
     if edits.is_empty() {
         return Err("edits array is empty — give at least one edit".into());
     }
 
-    let current = get_content(app_handle, id)
+    let current = get_content(app_handle, id, workspace)
         .ok_or_else(|| format!("no skill with id {} — use create_skill for a new one", id))?;
     let mut content = current;
 
@@ -703,10 +830,10 @@ pub fn edit_skill(
     // Preserve the existing name/description/triggers — an edit_skill call
     // changes the body, not the metadata (use write_skill directly, or a
     // future rename tool, for that).
-    let existing = list(app_handle).into_iter().find(|s| s.id == id)
+    let existing = list(app_handle, workspace).into_iter().find(|s| s.id == id)
         .ok_or_else(|| format!("no skill with id {}", id))?;
 
-    write_skill(app_handle, Some(id), &existing.name, &existing.description, &content, &existing.triggers)?;
+    write_skill(app_handle, Some(id), &existing.name, &existing.description, &content, &existing.triggers, workspace, false)?;
     Ok(format!("applied {} edit{} to skill {}", edits.len(), if edits.len() == 1 { "" } else { "s" }, id))
 }
 
@@ -755,6 +882,9 @@ pub fn reject_proposal(app_handle: &tauri::AppHandle, id: &str) -> Result<(), St
 pub fn accept_proposal(app_handle: &tauri::AppHandle, id: &str) -> Result<Skill, String> {
     let proposal = get_proposal(app_handle, id).ok_or("proposal not found")?;
 
+    // Proposals (the reflection-pass review queue) are always global-scoped
+    // for now — a project-scoped proposal flow would need SkillProposal to
+    // carry which workspace it came from, which nothing currently sets.
     let skill = write_skill(
         app_handle,
         proposal.target_id.as_deref(),
@@ -762,6 +892,8 @@ pub fn accept_proposal(app_handle: &tauri::AppHandle, id: &str) -> Result<Skill,
         &proposal.description,
         &proposal.content,
         &proposal.triggers,
+        None,
+        false,
     )?;
 
     reject_proposal(app_handle, id).ok(); // remove from queue now that it's applied
@@ -774,7 +906,7 @@ pub fn tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "list_skills",
-                "description": "List available skills (id, name, one-line description). Check this before an unfamiliar task or language — a matching skill may be worth reading first. Also check this before create_skill/propose_skill, to see whether something close enough already exists to edit instead of duplicate.",
+                "description": "List available skills (id, name, one-line description, and source — builtin/installed/learned/project). When a workspace is open this includes that project's own .kestrel/skills/ library alongside the global one; a project skill with the same id as a global one takes precedence for this project. Check this before an unfamiliar task or language — a matching skill may be worth reading first. Also check this before create_skill/propose_skill, to see whether something close enough already exists to edit instead of duplicate.",
                 "parameters": { "type": "object", "properties": {} }
             }
         },
@@ -805,7 +937,12 @@ pub fn tool_definitions() -> Value {
                         "triggers": {
                             "type": "array",
                             "items": { "type": "string" },
-                            "description": "Optional. Words/phrases that should auto-load this skill's content when they appear in a user message (case-insensitive; multi-word or dotted entries match as substrings, single words match as whole tokens). Keep this short and specific — over-broad triggers (e.g. a single common word) will fire on unrelated conversations."
+                            "description": "Optional. Words/phrases that should auto-load this skill's content when they appear in a user message (case-insensitive; multi-word or dotted entries match as substrings, single words match as whole tokens). Keep this short and specific — over-broad triggers (e.g. a single common word) will fire on unrelated conversations. Automatic AI-based matching also runs regardless of triggers, so this is an optimization, not the only way a skill gets found."
+                        },
+                        "scope": {
+                            "type": "string",
+                            "enum": ["global", "project"],
+                            "description": "Optional, defaults to 'global'. 'project' saves this into the current workspace's .kestrel/skills/ folder instead of the app-wide library — use this for anything specific to this one project (its deploy process, its own conventions) that wouldn't make sense in another codebase. Requires an active workspace; a project skill can also be committed to the repo and shared with anyone else working on it."
                         }
                     },
                     "required": ["name", "description", "content"]
@@ -866,20 +1003,21 @@ pub fn maybe_execute(
     app_handle: &tauri::AppHandle,
     name: &str,
     args: &Value,
+    workspace: Option<&str>,
 ) -> Option<Result<String, String>> {
     match name {
         "list_skills" => {
-            let summary: Vec<String> = list(app_handle)
+            let summary: Vec<String> = list(app_handle, workspace)
                 .into_iter()
                 .filter(|s| s.enabled)
-                .map(|s| format!("{} — {}: {}", s.id, s.name, s.description))
+                .map(|s| format!("{} [{}] — {}: {}", s.id, s.source, s.name, s.description))
                 .collect();
             Some(Ok(summary.join("\n")))
         }
         "read_skill" => {
             let id = args.get("id").and_then(|v| v.as_str());
             Some(match id {
-                Some(id) => get_content(app_handle, id)
+                Some(id) => get_content(app_handle, id, workspace)
                     .ok_or_else(|| format!("no skill with id {}", id)),
                 None => Err("missing id".to_string()),
             })
@@ -889,12 +1027,13 @@ pub fn maybe_execute(
             let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str());
             let id = args.get("id").and_then(|v| v.as_str());
+            let is_project = args.get("scope").and_then(|v| v.as_str()) == Some("project");
             let triggers: Vec<String> = args.get("triggers").and_then(|v| v.as_array())
                 .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
                 .unwrap_or_default();
             Some(match (name_arg, content) {
-                (Some(name), Some(content)) => write_skill(app_handle, id, name, description, content, &triggers)
-                    .map(|s| format!("created skill '{}' (id: {})", s.name, s.id)),
+                (Some(name), Some(content)) => write_skill(app_handle, id, name, description, content, &triggers, workspace, is_project)
+                    .map(|s| format!("created skill '{}' (id: {}, scope: {})", s.name, s.id, s.source)),
                 _ => Err("missing name or content".to_string()),
             })
         }
@@ -910,7 +1049,7 @@ pub fn maybe_execute(
                             e.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false),
                         )
                     }).collect();
-                    edit_skill(app_handle, id, &parsed)
+                    edit_skill(app_handle, id, &parsed, workspace)
                 }
                 (Some(_), _) => Err("edits array is missing or empty".to_string()),
                 _ => Err("missing id".to_string()),
@@ -927,7 +1066,7 @@ pub fn maybe_execute(
                 .unwrap_or_default();
             Some(match (name_arg, content, rationale) {
                 (Some(name), Some(content), Some(rationale)) => {
-                    let previous_content = target_id.as_deref().and_then(|id| get_content(app_handle, id));
+                    let previous_content = target_id.as_deref().and_then(|id| get_content(app_handle, id, workspace));
                     let proposal = SkillProposal {
                         id: uuid::Uuid::new_v4().to_string(),
                         kind: if target_id.is_some() { "update".to_string() } else { "create".to_string() },
@@ -984,6 +1123,7 @@ fn skill_keywords(id: &str) -> &'static [&'static str] {
         "pdf-reading" => &["pdf-reading", "pdf reading", "read pdf", "scanned pdf", "pdftotext", "pdfinfo", "pdffonts"],
         "pptx" => &["pptx", "potx", "powerpoint", "presentation", "slide deck", ".pptx", ".potx"],
         "xlsx" => &["xlsx", "xlsm", "xls", "excel", "spreadsheet", "openpyxl", ".xlsx", ".xlsm"],
+        "agents-md" => &["agents.md", "agent instructions", "agents file", "repo instructions"],
         _ => &[],
     }
 }
@@ -1007,14 +1147,14 @@ fn matches_keyword(lower: &str, tokens: &std::collections::HashSet<&str>, kw: &s
 /// A skill with neither still works fine; it just relies on the model
 /// finding it via list_skills/read_skill instead of automatic loading,
 /// same as before this existed.
-pub fn find_relevant(app_handle: &tauri::AppHandle, text: &str) -> Vec<Skill> {
+pub fn find_relevant(app_handle: &tauri::AppHandle, text: &str, workspace: Option<&str>) -> Vec<Skill> {
     let lower = text.to_lowercase();
     let tokens: std::collections::HashSet<&str> = lower
         .split(|c: char| !c.is_alphanumeric())
         .filter(|s| !s.is_empty())
         .collect();
 
-    list(app_handle)
+    list(app_handle, workspace)
         .into_iter()
         .filter(|s| {
             s.enabled
@@ -1022,6 +1162,82 @@ pub fn find_relevant(app_handle: &tauri::AppHandle, text: &str) -> Vec<Skill> {
                     || s.triggers.iter().any(|kw| matches_keyword(&lower, &tokens, kw)))
         })
         .collect()
+}
+
+/// The judgment-based counterpart to find_relevant(): rather than
+/// requiring a skill's author to have predicted the exact words a future
+/// user would type, this hands the fast/cheap model a plain catalog
+/// (id + description only — never full skill content, to keep this call
+/// small) of whatever find_relevant's keyword pass *didn't* already
+/// catch, and asks it to judge relevance the way a person skimming
+/// list_skills would. Keyword matching stays as the free, instant
+/// fast-path (see find_relevant); this is the catch-all for paraphrases,
+/// synonyms, and skills whose triggers just don't happen to overlap with
+/// how someone phrased their message. Returns an empty vec (rather than
+/// erroring the turn) on any request failure or malformed response —
+/// this is a nice-to-have enhancement to context-loading, never something
+/// a turn should be blocked on.
+pub async fn find_relevant_ai(
+    app_handle: &tauri::AppHandle,
+    cfg: &crate::config::OmniRouteConfig,
+    workspace: Option<&str>,
+    text: &str,
+    already_matched: &std::collections::HashSet<String>,
+) -> Vec<Skill> {
+    let candidates: Vec<Skill> = list(app_handle, workspace)
+        .into_iter()
+        .filter(|s| s.enabled && !already_matched.contains(&s.id))
+        .collect();
+    if candidates.is_empty() {
+        return vec![];
+    }
+
+    let catalog = candidates
+        .iter()
+        .map(|s| format!("- {} ({}): {}", s.id, s.source, s.description))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let system = crate::omniroute::ChatMessage {
+        role: "system".into(),
+        content: Some(format!(
+            "You decide which of the following reference skills, if any, would genuinely help \
+             with the user's message below. Only include a skill if reading it would actually \
+             change how the task should be approached — an empty answer is normal and common, \
+             don't include something just because it's loosely topical.\n\nAvailable skills:\n{}\n\n\
+             Respond with ONLY a JSON array of relevant skill ids, e.g. [\"git-workflow\"] or []. \
+             No prose, no markdown fences, no explanation.",
+            catalog
+        )),
+        ..Default::default()
+    };
+    let user = crate::omniroute::ChatMessage {
+        role: "user".into(),
+        content: Some(text.to_string()),
+        ..Default::default()
+    };
+
+    let Ok(resp) = crate::omniroute::chat_completion(cfg, "auto/fast", &[system, user], None).await else {
+        return vec![];
+    };
+    let Some(raw) = resp.content else { return vec![] };
+    let ids = parse_id_array(&raw);
+    candidates.into_iter().filter(|s| ids.contains(&s.id)).collect()
+}
+
+/// Tolerant parse of the fast model's "JSON array of ids" response —
+/// strips a markdown code fence if the model added one anyway despite
+/// being told not to, since that's a common enough small model quirk to
+/// just handle rather than lose a genuinely useful match over.
+fn parse_id_array(raw: &str) -> Vec<String> {
+    let mut cleaned = raw.trim();
+    if let Some(rest) = cleaned.strip_prefix("```json") {
+        cleaned = rest.trim();
+    } else if let Some(rest) = cleaned.strip_prefix("```") {
+        cleaned = rest.trim();
+    }
+    cleaned = cleaned.trim_end_matches("```").trim();
+    serde_json::from_str::<Vec<String>>(cleaned).unwrap_or_default()
 }
 
 /// Tools that mutate the active skill set and so, under planning mode,
