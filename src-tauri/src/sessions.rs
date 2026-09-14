@@ -40,6 +40,24 @@ pub struct Session {
     /// qualifying turn or two count toward the first reflection as normal.
     #[serde(default)]
     pub turns_since_reflection: u32,
+    /// Run run_shell inside a locked-down Docker container (no host
+    /// filesystem access outside the workspace, no network unless
+    /// sandbox_network is also on, dropped capabilities) instead of
+    /// directly on the host with the user's own permissions. Off by
+    /// default — most coding tasks are fine running directly and this
+    /// requires Docker to be installed — but worth turning on for a task
+    /// that involves running code of unknown origin (an obfuscated jar
+    /// someone's decompiling and rebuilding, for instance), where run_shell
+    /// executing arbitrary commands with the user's real permissions is a
+    /// meaningfully worse tradeoff than usual.
+    #[serde(default)]
+    pub sandbox_shell: bool,
+    /// Whether the sandbox (when sandbox_shell is on) has network access.
+    /// Off by default, matching sandbox_shell's own default posture —
+    /// enable it only for a sandboxed task that genuinely needs to fetch
+    /// something (a build tool downloading its dependencies).
+    #[serde(default)]
+    pub sandbox_network: bool,
 }
 
 fn sessions_dir(app_handle: &tauri::AppHandle) -> PathBuf {
@@ -79,9 +97,25 @@ pub fn create(
         messages: vec![],
         created_at: now_ms(),
         turns_since_reflection: 0,
+        sandbox_shell: false,
+        sandbox_network: false,
     };
     save(app_handle, &session);
     session
+}
+
+pub fn set_sandbox_shell(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+    let mut session = load(app_handle, id).ok_or("Session not found")?;
+    session.sandbox_shell = enabled;
+    save(app_handle, &session);
+    Ok(())
+}
+
+pub fn set_sandbox_network(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+    let mut session = load(app_handle, id).ok_or("Session not found")?;
+    session.sandbox_network = enabled;
+    save(app_handle, &session);
+    Ok(())
 }
 
 pub fn set_workspace(app_handle: &tauri::AppHandle, id: &str, workspace: String) -> Result<(), String> {

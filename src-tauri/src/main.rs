@@ -2,9 +2,11 @@
 
 mod agent;
 mod config;
+mod context;
 mod engine;
 mod github;
 mod omniroute;
+mod plan;
 mod prompts;
 mod reflect;
 mod sessions;
@@ -202,6 +204,24 @@ fn set_session_planning(
     enabled: bool,
 ) -> Result<(), String> {
     sessions::set_planning_enabled(&app_handle, &id, enabled)
+}
+
+#[tauri::command]
+fn set_session_sandbox_shell(
+    app_handle: tauri::AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    sessions::set_sandbox_shell(&app_handle, &id, enabled)
+}
+
+#[tauri::command]
+fn set_session_sandbox_network(
+    app_handle: tauri::AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    sessions::set_sandbox_network(&app_handle, &id, enabled)
 }
 
 #[tauri::command]
@@ -511,6 +531,8 @@ fn main() {
             set_session_subagents,
             set_session_graceful_stop,
             set_session_planning,
+            set_session_sandbox_shell,
+            set_session_sandbox_network,
             approve_all_pending,
             send_message,
             stop_session,
