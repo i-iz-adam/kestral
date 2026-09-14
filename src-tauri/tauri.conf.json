@@ -48,7 +48,7 @@
       }
     },
     "updater": {
-      "active": true,
+      "active": false,
       "endpoints": [
         "https://github.com/i-iz-adam/kestral/releases/latest/download/latest.json"
       ],
