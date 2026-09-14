@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { open } from "@tauri-apps/api/dialog";
 import type { OmniRouteConfigPayload, SessionDefaults, Workspace } from "../types";
+import UpdaterModal from "./UpdaterModal";
+import CustomInstallerModal from "./CustomInstallerModal";
 
 export default function Settings() {
   const [mode, setMode] = useState<"local" | "remote">("local");
@@ -21,6 +23,9 @@ export default function Settings() {
   const [defaultSubagents, setDefaultSubagents] = useState(true);
   const [defaultGracefulStop, setDefaultGracefulStop] = useState(true);
   const [defaultsSaved, setDefaultsSaved] = useState(false);
+
+  const [updaterOpen, setUpdaterOpen] = useState(false);
+  const [installerOpen, setInstallerOpen] = useState(false);
 
   useEffect(() => {
     invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then(
@@ -236,6 +241,21 @@ export default function Settings() {
       </section>
 
       <section>
+        <h3>Application Updates & Installer</h3>
+        <p className="hint small">
+          Check for software updates or rerun the custom installation setup.
+        </p>
+        <div className="row" style={{ marginTop: 10 }}>
+          <button className="primary" onClick={() => setUpdaterOpen(true)}>
+            Check for Updates
+          </button>
+          <button onClick={() => setInstallerOpen(true)}>
+            Launch Installer
+          </button>
+        </div>
+      </section>
+
+      <section>
         <h3>Workspaces</h3>
         <p className="hint small">
           Folders the agent can work from. Each session picks one when it's
@@ -262,6 +282,9 @@ export default function Settings() {
           Add folder
         </button>
       </section>
+
+      <UpdaterModal isOpen={updaterOpen} onClose={() => setUpdaterOpen(false)} />
+      <CustomInstallerModal isOpen={installerOpen} onClose={() => setInstallerOpen(false)} />
     </div>
   );
 }

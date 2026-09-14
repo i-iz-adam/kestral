@@ -7,6 +7,8 @@ import SkillsPanel from "./SkillsPanel";
 import About from "./About";
 import ProvidersPanel from "./ProvidersPanel";
 import AmbientMotes from "./AmbientMotes";
+import UpdaterModal from "./UpdaterModal";
+import CustomInstallerModal from "./CustomInstallerModal";
 import { setActiveSession } from "./agentStore";
 
 type View =
@@ -21,6 +23,8 @@ type View =
 export default function AppShell() {
   const [view, setView] = useState<View>({ kind: "empty" });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [updaterOpen, setUpdaterOpen] = useState(false);
+  const [installerOpen, setInstallerOpen] = useState(false);
 
   // The store needs to know which session (if any) is on screen purely to
   // decide whether a background turn finishing counts as "unseen" — this
@@ -67,6 +71,9 @@ export default function AppShell() {
           )}
         </div>
       </div>
+
+      <UpdaterModal isOpen={updaterOpen} onClose={() => setUpdaterOpen(false)} />
+      <CustomInstallerModal isOpen={installerOpen} onClose={() => setInstallerOpen(false)} />
     </div>
   );
 }

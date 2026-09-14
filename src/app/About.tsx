@@ -1,6 +1,11 @@
+import { useState } from "react";
+import UpdaterModal from "./UpdaterModal";
+import CustomInstallerModal from "./CustomInstallerModal";
 import { open } from "@tauri-apps/api/shell";
 
 export default function About() {
+  const [updaterOpen, setUpdaterOpen] = useState(false);
+  const [installerOpen, setInstallerOpen] = useState(false);
   const openLink = (url: string) => open(url);
 
   return (
@@ -11,6 +16,21 @@ export default function About() {
         built directly on top of the projects below — neither the routing
         engine nor the original agent design are ours.
       </p>
+
+      <section>
+        <h3>Updates & Installation</h3>
+        <p className="modal-text">
+          Current Version: <strong>v0.1.0</strong>
+        </p>
+        <div className="row" style={{ marginTop: 10 }}>
+          <button className="primary" onClick={() => setUpdaterOpen(true)}>
+            Check for Updates
+          </button>
+          <button onClick={() => setInstallerOpen(true)}>
+            Run Custom Installer
+          </button>
+        </div>
+      </section>
 
       <section>
         <h3>OmniRoute</h3>
@@ -50,6 +70,9 @@ export default function About() {
           This project is MIT licensed — see LICENSE in the repository.
         </p>
       </section>
+
+      <UpdaterModal isOpen={updaterOpen} onClose={() => setUpdaterOpen(false)} />
+      <CustomInstallerModal isOpen={installerOpen} onClose={() => setInstallerOpen(false)} />
     </div>
   );
 }
