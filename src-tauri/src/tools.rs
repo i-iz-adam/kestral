@@ -2,6 +2,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 /// Directory names skipped entirely by search_code/find_files — build
 /// output, dependency trees, and VCS internals that are almost never what
@@ -172,6 +173,21 @@ pub fn tool_definitions() -> Value {
         {
             "type": "function",
             "function": {
+                "name": "run_python",
+                "description": "Execute Python code in a sandboxed subprocess. By default, runs in an isolated temporary directory with network disabled and strict execution bounds (wall-clock timeout & output size limits). Set workspace_access: true to allow reading/writing files in the workspace root.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": { "type": "string", "description": "The Python code snippet or script to execute." },
+                        "workspace_access": { "type": "boolean", "description": "Optional. Defaults to false (isolated temp directory sandbox). Set true if code must read or write files directly in the workspace root." }
+                    },
+                    "required": ["code"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "web_search",
                 "description": "Perform a web search query via OmniRoute (supports Tavily, Brave, Exa, Serper, etc.) to find current information, documentation, news, or articles on the internet.",
                 "parameters": {
@@ -207,6 +223,13 @@ pub fn tool_definitions() -> Value {
 /// planning mode is on. Read-only tools always execute immediately.
 pub fn is_mutating(tool_name: &str) -> bool {
     matches!(tool_name, "write_file" | "edit_file" | "apply_patch" | "run_shell")
+}
+
+pub fn is_mutating_with_args(tool_name: &str, args: &Value) -> bool {
+    if tool_name == "run_python" {
+        return args.get("workspace_access").and_then(|v| v.as_bool()).unwrap_or(false);
+    }
+    is_mutating(tool_name)
 }
 
 /// Resolves a relative path against the workspace root and does a
@@ -723,6 +746,112 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
             let stderr = String::from_utf8_lossy(&output.stderr);
             Ok(format!("stdout:\n{}\nstderr:\n{}", stdout, stderr))
         }
+        "run_python" => {
+            let code = args
+                .get("code")
+                .and_then(|v| v.as_str())
+                .ok_or("missing code")?;
+            let workspace_access = args
+                .get("workspace_access")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let (working_dir, _is_temp) = if workspace_access {
+                (resolve_path(workspace, ".")?, false)
+            } else {
+                let temp_dir = std::env::temp_dir().join(format!("kestrel_python_{}", uuid::Uuid::new_v4()));
+                fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {}", e))?;
+                (temp_dir, true)
+            };
+
+            run_python_execution(&working_dir, code)
+        }
         _ => Err(format!("unknown tool: {}", name)),
+    }
+}
+
+fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String> {
+    let script_path = working_dir.join("script.py");
+    fs::write(&script_path, code).map_err(|e| format!("failed to write python script: {}", e))?;
+
+    let python_bin = if Command::new("python3").arg("--version").output().is_ok() {
+        "python3"
+    } else if Command::new("python").arg("--version").output().is_ok() {
+        "python"
+    } else {
+        return Err("Python interpreter ('python3' or 'python') not found on system PATH.".to_string());
+    };
+
+    let mut cmd = Command::new(python_bin);
+    cmd.arg("script.py")
+        .current_dir(working_dir)
+        .env("HTTP_PROXY", "")
+        .env("HTTPS_PROXY", "")
+        .env("ALL_PROXY", "")
+        .env("NO_PROXY", "*");
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("failed to spawn python process: {}", e))?;
+
+    let timeout = Duration::from_secs(30);
+    let start = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().map_err(|e| format!("failed to read python output: {}", e))?;
+                let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                const MAX_OUTPUT_BYTES: usize = 100_000;
+                if stdout.len() > MAX_OUTPUT_BYTES {
+                    stdout.truncate(MAX_OUTPUT_BYTES);
+                    stdout.push_str("\n... [stdout truncated at 100KB]");
+                }
+                if stderr.len() > MAX_OUTPUT_BYTES {
+                    stderr.truncate(MAX_OUTPUT_BYTES);
+                    stderr.push_str("\n... [stderr truncated at 100KB]");
+                }
+
+                let mut generated_artifacts = Vec::new();
+                if let Ok(entries) = fs::read_dir(working_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_file() {
+                            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                                if matches!(ext.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp" | "svg") {
+                                    if path.file_name().and_then(|n| n.to_str()) != Some("script.py") {
+                                        generated_artifacts.push(path.to_string_lossy().to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let mut res = format!("Exit status: {}\nstdout:\n{}\nstderr:\n{}", status, stdout, stderr);
+                if !generated_artifacts.is_empty() {
+                    res.push_str("\nGenerated image artifacts:\n");
+                    for artifact in generated_artifacts {
+                        res.push_str(&format!("- {}\n", artifact));
+                    }
+                }
+                return Ok(res);
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    return Err("Python execution timed out after 30 seconds.".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("error waiting for python process: {}", e)),
+        }
     }
 }

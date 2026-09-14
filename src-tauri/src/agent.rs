@@ -382,6 +382,10 @@ pub(crate) fn is_mutating(name: &str) -> bool {
     tools::is_mutating(name) || github::is_mutating(name) || skills::is_mutating(name)
 }
 
+pub(crate) fn is_mutating_call(name: &str, args: &Value) -> bool {
+    tools::is_mutating_with_args(name, args) || github::is_mutating(name) || skills::is_mutating(name)
+}
+
 pub(crate) fn emit_tool_event(
     app_handle: &tauri::AppHandle,
     session_id: &str,
@@ -492,7 +496,7 @@ pub(crate) async fn handle_tool_call(
         .map(|s| s.planning_enabled)
         .unwrap_or(session.planning_enabled);
 
-    if planning_enabled && is_mutating(&call.function.name) {
+    if planning_enabled && is_mutating_call(&call.function.name, &args) {
         let (tx, rx) = oneshot::channel::<bool>();
         approvals.0.lock().unwrap().insert(call.id.clone(), (session_id.to_string(), tx));
 
