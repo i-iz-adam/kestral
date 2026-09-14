@@ -169,13 +169,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       e.target.value = "";
     }
   };
-    const text = input;
-    setInput("");
-
-    if (looksLikeSlashCommand(text)) {
-      runSlashCommand(text);
-      return;
-    }
 
   const send = async () => {
     if ((!input.trim() && attachedImages.length === 0) || sending) return;
