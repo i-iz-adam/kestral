@@ -41,10 +41,12 @@ function splitThinking(content: string): ThinkSplit {
 export default function MessageContent({
   role,
   content,
+  images,
   streaming,
 }: {
   role: string;
   content: string;
+  images?: string[];
   streaming?: boolean;
 }) {
   const split = role === "assistant"
@@ -62,7 +64,18 @@ export default function MessageContent({
   }, [thinkingOpen, answer]);
 
   if (role !== "assistant") {
-    return <p className="plain-text">{content}</p>;
+    return (
+      <div className="message-bubble-user-content">
+        {images && images.length > 0 && (
+          <div className="message-images-grid">
+            {images.map((img, idx) => (
+              <img key={idx} src={img} alt={`attached-${idx}`} className="message-attached-image" />
+            ))}
+          </div>
+        )}
+        {content && <p className="plain-text">{content}</p>}
+      </div>
+    );
   }
 
   return (
