@@ -13,6 +13,7 @@ export interface ToolCall {
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool" | "skill-loaded";
   content?: string | null;
+  images?: string[] | null;
   tool_calls?: ToolCall[] | null;
   tool_call_id?: string | null;
   name?: string | null;
@@ -50,6 +51,7 @@ export interface MessageEventPayload {
   session_id: string;
   role: string;
   content: string;
+  images?: string[] | null;
   /** Ties this final message to the start/delta events for the same
    * streamed turn. Absent for the user's own (never-streamed) message. */
   request_id?: string | null;
@@ -78,10 +80,6 @@ export interface TurnEndEventPayload {
   reason?: "normal" | "stopped" | null;
 }
 
-/** One entry in the session's chronological view â€” a chat bubble or a
- * top-level tool call â€” kept in a single array so render order always
- * matches the order these actually happened in, instead of grouping all
- * messages before all tool calls regardless of when each occurred. */
 export type TimelineItem =
   | {
       kind: "message";
@@ -89,18 +87,13 @@ export type TimelineItem =
       requestId?: string;
       role: string;
       content: string;
+      images?: string[];
       streaming: boolean;
     }
   | { kind: "tool"; key: string; callId: string };
 
-/** One entry in a session's *persisted* history, reconstructed from its
- * saved ChatMessage[] on load â€” a chat bubble or a top-level tool call.
- * Unlike TimelineItem (which looks tool state up from a live `liveCalls`
- * map so in-place status updates are cheap), a HistoryItem carries its
- * ToolCallEventPayload directly, since persisted calls are already
- * finished and never change again. */
 export type HistoryItem =
-  | { kind: "message"; key: string; role: string; content: string }
+  | { kind: "message"; key: string; role: string; content: string; images?: string[] }
   | { kind: "tool"; key: string; call: ToolCallEventPayload };
 
 export interface OmniRouteConfigPayload {
@@ -110,23 +103,14 @@ export interface OmniRouteConfigPayload {
 }
 
 export interface Skill {
-
   id: string;
-
   name: string;
-
   description: string;
-
   source: "builtin" | "installed" | "learned" | "project";
-
   enabled: boolean;
-
   triggers: string[];
-
   overridden: boolean;
-
 }
-
 
 export interface SkillProposal {
   id: string;

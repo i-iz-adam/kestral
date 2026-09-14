@@ -261,6 +261,7 @@ export function ensureAgentEventsStarted() {
           requestId: evt.payload.request_id,
           role: evt.payload.role,
           content: evt.payload.content,
+          images: evt.payload.images ?? undefined,
           streaming: false,
         };
         patch(session_id, { timeline });
@@ -275,6 +276,7 @@ export function ensureAgentEventsStarted() {
           key: nextKey("msg"),
           role: evt.payload.role,
           content: evt.payload.content,
+          images: evt.payload.images ?? undefined,
           streaming: false,
         },
       ],

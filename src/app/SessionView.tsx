@@ -38,6 +38,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   // to unmount this entirely) no longer loses a turn in progress.
   const { session, timeline, liveCalls, sending } = useAgentSession(sessionId);
   const [input, setInput] = useState("");
+  const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [editingWorkspace, setEditingWorkspace] = useState(false);
   const [workspaceDraft, setWorkspaceDraft] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -139,8 +140,35 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   };
 
-  const send = async () => {
-    if (!input.trim() || sending) return;
+  const processFiles = (files: FileList | File[]) => {
+    Array.from(files).forEach((file) => {
+      if (file.type.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (e.target?.result) {
+            setAttachedImages((prev) => [...prev, e.target!.result as string]);
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (e.clipboardData && e.clipboardData.files.length > 0) {
+      const imageFiles = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+      if (imageFiles.length > 0) {
+        processFiles(imageFiles);
+      }
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      processFiles(e.target.files);
+      e.target.value = "";
+    }
+  };
     const text = input;
     setInput("");
 
@@ -149,13 +177,20 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       return;
     }
 
+  const send = async () => {
+    if ((!input.trim() && attachedImages.length === 0) || sending) return;
+    const text = input;
+    const imgs = [...attachedImages];
+    setInput("");
+    setAttachedImages([]);
+
+    if (looksLikeSlashCommand(text)) {
+      runSlashCommand(text);
+      return;
+    }
+
     markSendingStart(sessionId);
-    // Errors surface via the global agent://turn-end listener (agentStore.ts)
-    // as a system note in this session's timeline, regardless of whether
-    // this component is still mounted when they arrive — so there's
-    // nothing left to do here on rejection except avoid an unhandled
-    // promise rejection warning.
-    invoke("send_message", { sessionId, message: text }).catch(() => {});
+    invoke("send_message", { sessionId, message: text, images: imgs.length > 0 ? imgs : null }).catch(() => {});
   };
 
   // The Stop button's handler — the backend sets a stop flag for the
@@ -233,7 +268,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         <div key={item.key} className={"message " + item.role}>
           <span className="role-label">{item.role}</span>
           <div className="bubble">
-            <MessageContent role={item.role} content={item.content} />
+            <MessageContent role={item.role} content={item.content} images={item.images} />
           </div>
         </div>
       );
@@ -268,7 +303,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         >
           <span className="role-label">{item.role}</span>
           <div className="bubble">
-            <MessageContent role={item.role} content={item.content} streaming={item.streaming} />
+            <MessageContent role={item.role} content={item.content} images={item.images} streaming={item.streaming} />
           </div>
         </div>
       );
@@ -355,6 +390,23 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       </div>
 
       <div className="composer-area">
+        {attachedImages.length > 0 && (
+          <div className="attached-images-preview">
+            {attachedImages.map((img, idx) => (
+              <div key={idx} className="preview-thumbnail">
+                <img src={img} alt={`preview-${idx}`} />
+                <button
+                  type="button"
+                  className="remove-img-btn"
+                  onClick={() => setAttachedImages((prev) => prev.filter((_, i) => i !== idx))}
+                  title="Remove image"
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {session.mode === "coding" && slashMatches.length > 0 && (
           <SlashCommandMenu
             commands={slashMatches}
@@ -363,10 +415,23 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           />
         )}
         <div className="composer">
+          <label className="attach-btn" title="Attach image">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleFileSelect}
+              style={{ display: "none" }}
+            />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 4 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </label>
           <textarea
             ref={composerRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={handlePaste}
             onKeyDown={(e) => {
               if (slashMatches.length > 0) {
                 if (e.key === "ArrowDown") {

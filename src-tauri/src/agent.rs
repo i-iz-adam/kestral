@@ -243,6 +243,8 @@ struct MessageEvent<'a> {
     session_id: &'a str,
     role: &'a str,
     content: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    images: Option<&'a [String]>,
     /// Ties this final message to the "start"/"delta" events for the same
     /// assistant turn (see MessageStartEvent) so the frontend can finalize
     /// the streaming bubble it already built rather than appending a
@@ -597,8 +599,9 @@ pub async fn run_turn(
     stops: tauri::State<'_, StopRequests>,
     session_id: String,
     user_message: String,
+    images: Option<Vec<String>>,
 ) -> Result<(), String> {
-    run_turn_with_stop(app_handle, approvals, stops, session_id, user_message).await
+    run_turn_with_stop(app_handle, approvals, stops, session_id, user_message, images).await
 }
 
 pub async fn run_turn_with_stop(
@@ -607,10 +610,11 @@ pub async fn run_turn_with_stop(
     stops: tauri::State<'_, StopRequests>,
     session_id: String,
     user_message: String,
+    images: Option<Vec<String>>,
 ) -> Result<(), String> {
     stops.reset(&session_id);
     let stop_flag = stops.entry(&session_id);
-    let result = run_turn_inner(&app_handle, approvals, &stops, stop_flag.clone(), &session_id, user_message).await;
+    let result = run_turn_inner(&app_handle, approvals, &stops, stop_flag.clone(), &session_id, user_message, images).await;
     let reason = if stop_flag.requested.load(Ordering::Relaxed) { "stopped" } else { "normal" };
     let _ = app_handle.emit_all(
         "agent://turn-end",
@@ -682,6 +686,7 @@ async fn run_turn_inner(
     stop_flag: Arc<SessionStop>,
     session_id: &str,
     user_message: String,
+    images: Option<Vec<String>>,
 ) -> Result<(), String> {
     let cfg = config::load_omniroute_config(app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
@@ -694,11 +699,18 @@ async fn run_turn_inner(
     session.messages.push(ChatMessage {
         role: "user".into(),
         content: Some(user_message.clone()),
+        images: images.clone(),
         ..Default::default()
     });
     let _ = app_handle.emit_all(
         "agent://message",
-        MessageEvent { session_id, role: "user", content: &user_message, request_id: None },
+        MessageEvent {
+            session_id,
+            role: "user",
+            content: &user_message,
+            images: images.as_deref(),
+            request_id: None,
+        },
     );
 
     // System prompt is built fresh each turn rather than persisted into
@@ -910,6 +922,7 @@ async fn run_turn_inner(
                     session_id,
                     role: "assistant",
                     content: &text,
+                    images: None,
                     request_id: Some(&request_id),
                 },
             );

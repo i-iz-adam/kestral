@@ -255,8 +255,9 @@ async fn send_message(
     stops: tauri::State<'_, agent::StopRequests>,
     session_id: String,
     message: String,
+    images: Option<Vec<String>>,
 ) -> Result<(), String> {
-    agent::run_turn(app_handle, approvals, stops, session_id, message).await
+    agent::run_turn(app_handle, approvals, stops, session_id, message, images).await
 }
 
 #[tauri::command]

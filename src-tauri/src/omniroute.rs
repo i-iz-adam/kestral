@@ -34,6 +34,8 @@ pub struct ChatMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
@@ -180,6 +182,60 @@ fn accumulate_tool_call_delta(tool_acc: &mut ToolAcc, calls: &[Value]) {
     }
 }
 
+pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
+    let base = match base_url(cfg) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    let url = format!("{}/v1/models", base);
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url);
+    if let Some(key) = &cfg.api_key {
+        if !key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+    if let Ok(resp) = req.send().await {
+        if resp.status().is_success() {
+            if let Ok(json) = resp.json::<Value>().await {
+                let models_array = json
+                    .get("data")
+                    .or_else(|| json.get("models"))
+                    .and_then(|m| m.as_array());
+
+                if let Some(models) = models_array {
+                    for m in models {
+                        let id = m.get("id").and_then(|s| s.as_str()).unwrap_or_default();
+                        if id == model {
+                            if let Some(caps) = m.get("capabilities").or_else(|| m.get("supports")) {
+                                if let Some(v) = caps.get("vision").or_else(|| caps.get("multimodal")) {
+                                    if let Some(b) = v.as_bool() {
+                                        return b;
+                                    }
+                                }
+                            }
+                            if let Some(multimodal) = m.get("multimodal").and_then(|v| v.as_bool()) {
+                                return multimodal;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let lower = model.to_lowercase();
+    lower.contains("vision")
+        || lower.contains("vl")
+        || lower.contains("gpt-4o")
+        || lower.contains("claude-3")
+        || lower.contains("gemini")
+        || lower.contains("llava")
+        || lower.contains("qwen-vl")
+        || lower.contains("pixtral")
+        || lower.contains("auto")
+}
+
 fn finish_tool_acc(tool_acc: ToolAcc) -> Option<Vec<ToolCall>> {
     if !tool_acc.iter().any(|(_, _, n, _)| !n.is_empty()) {
         return None;
@@ -262,9 +318,50 @@ pub async fn chat_completion(
     let base = base_url(cfg)?;
     let url = format!("{}/v1/chat/completions", base);
 
+    let has_vision = supports_vision(cfg, model).await;
+
+    let formatted_messages: Vec<Value> = messages
+        .iter()
+        .map(|m| {
+            if has_vision && m.images.as_ref().map_or(false, |imgs| !imgs.is_empty()) {
+                let mut content_parts: Vec<Value> = Vec::new();
+                if let Some(text) = &m.content {
+                    if !text.is_empty() {
+                        content_parts.push(serde_json::json!({
+                            "type": "text",
+                            "text": text
+                        }));
+                    }
+                }
+                if let Some(imgs) = &m.images {
+                    for img in imgs {
+                        content_parts.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": img
+                            }
+                        }));
+                    }
+                }
+                let mut obj = serde_json::to_value(m).unwrap_or_default();
+                if let Some(map) = obj.as_object_mut() {
+                    map.insert("content".to_string(), Value::Array(content_parts));
+                    map.remove("images");
+                }
+                obj
+            } else {
+                let mut obj = serde_json::to_value(m).unwrap_or_default();
+                if let Some(map) = obj.as_object_mut() {
+                    map.remove("images");
+                }
+                obj
+            }
+        })
+        .collect();
+
     let mut body = serde_json::json!({
         "model": model,
-        "messages": messages,
+        "messages": formatted_messages,
         "stream": false,
     });
     if let Some(t) = tools {
@@ -352,9 +449,50 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     let base = base_url(cfg)?;
     let url = format!("{}/v1/chat/completions", base);
 
+    let has_vision = supports_vision(cfg, model).await;
+
+    let formatted_messages: Vec<Value> = messages
+        .iter()
+        .map(|m| {
+            if has_vision && m.images.as_ref().map_or(false, |imgs| !imgs.is_empty()) {
+                let mut content_parts: Vec<Value> = Vec::new();
+                if let Some(text) = &m.content {
+                    if !text.is_empty() {
+                        content_parts.push(serde_json::json!({
+                            "type": "text",
+                            "text": text
+                        }));
+                    }
+                }
+                if let Some(imgs) = &m.images {
+                    for img in imgs {
+                        content_parts.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": img
+                            }
+                        }));
+                    }
+                }
+                let mut obj = serde_json::to_value(m).unwrap_or_default();
+                if let Some(map) = obj.as_object_mut() {
+                    map.insert("content".to_string(), Value::Array(content_parts));
+                    map.remove("images");
+                }
+                obj
+            } else {
+                let mut obj = serde_json::to_value(m).unwrap_or_default();
+                if let Some(map) = obj.as_object_mut() {
+                    map.remove("images");
+                }
+                obj
+            }
+        })
+        .collect();
+
     let mut body = serde_json::json!({
         "model": model,
-        "messages": messages,
+        "messages": formatted_messages,
         "stream": true,
     });
     if let Some(t) = tools {

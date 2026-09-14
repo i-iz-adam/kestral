@@ -52,8 +52,14 @@ export function buildHistoryTimeline(messages: ChatMessage[]): HistoryItem[] {
 
     if (m.role !== "user" && m.role !== "assistant") continue;
 
-    if (m.content && m.content.trim()) {
-      items.push({ kind: "message", key: nextKey("msg"), role: m.role, content: m.content });
+    if ((m.content && m.content.trim()) || (m.images && m.images.length > 0)) {
+      items.push({
+        kind: "message",
+        key: nextKey("msg"),
+        role: m.role,
+        content: m.content ?? "",
+        images: m.images ?? undefined,
+      });
     }
 
     if (m.role === "assistant" && m.tool_calls) {
