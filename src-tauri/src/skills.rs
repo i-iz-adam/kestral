@@ -101,6 +101,7 @@ fn builtin_skills() -> Vec<BuiltinSkill> {
         ("xlsx", "xlsx", "Spreadsheet creation, editing, and analysis.", include_str!("../skills_builtin/xlsx/SKILL.md")),
         ("skill-creator", "Skill creator", "In-depth methodology for writing, editing, and improving skills — read this before authoring or updating one.", include_str!("../skills_builtin/skill-creator/SKILL.md")),
         ("agents-md", "AGENTS.md authoring", "How to write, structure, and maintain a project's AGENTS.md — the per-repo instructions file Kestrel (and other coding agents) reads automatically.", include_str!("../skills_builtin/agents-md.md")),
+        ("decompile-jar", "Decompiling and rebuilding a JVM jar", "Unpacking a jar (including an obfuscated one), decompiling its classes, and iterating on the result until it builds and runs again.", include_str!("../skills_builtin/decompile-jar.md")),
     ];
 
     raw_builtins
@@ -1124,6 +1125,7 @@ fn skill_keywords(id: &str) -> &'static [&'static str] {
         "pptx" => &["pptx", "potx", "powerpoint", "presentation", "slide deck", ".pptx", ".potx"],
         "xlsx" => &["xlsx", "xlsm", "xls", "excel", "spreadsheet", "openpyxl", ".xlsx", ".xlsm"],
         "agents-md" => &["agents.md", "agent instructions", "agents file", "repo instructions"],
+        "decompile-jar" => &["decompile", "decompiler", "decompiling", "unpack jar", "obfuscated", "obfuscation", "cfr", "vineflower", "fernflower", "bytecode", "jar file", ".jar", "procyon"],
         _ => &[],
     }
 }
