@@ -8,8 +8,10 @@ use tauri::Manager;
 use tokio::sync::{oneshot, Notify};
 
 use crate::config;
+use crate::context;
 use crate::github;
 use crate::omniroute::{self, ChatMessage, ToolCall};
+use crate::plan;
 use crate::prompts;
 use crate::reflect;
 use crate::sessions::{self, Session};
@@ -434,6 +436,34 @@ pub(crate) async fn execute_tool(
         // execute_tool -> subagent::run -> handle_tool_call -> execute_tool.
         return Box::pin(subagent::run(app_handle, approvals, stops, stop_flag, session, call_id, task)).await;
     }
+    if name == "update_plan" {
+        // Persisted straight to disk, independent of `session` and of the
+        // in-flight turn's message history — see plan.rs for why (it's
+        // what lets a plan survive context compaction).
+        return plan::maybe_execute(app_handle, &session.id, name, args)
+            .unwrap_or_else(|| Err("update_plan handler missing".to_string()));
+    }
+    if name == "run_shell" {
+        // Dispatched separately from the rest of tools::execute — this one
+        // needs real async cancellation (a timeout, and a kill path the
+        // Stop button can actually reach), which running it synchronously
+        // on the async runtime (the old behavior) couldn't provide at all.
+        let command = args.get("command").and_then(|v| v.as_str()).ok_or("missing command")?.to_string();
+        let timeout_secs = args
+            .get("timeout_seconds")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(tools::DEFAULT_SHELL_TIMEOUT_SECS);
+        let workspace = session.workspace.clone();
+        return tools::run_shell_async(
+            &workspace,
+            &command,
+            timeout_secs,
+            session.sandbox_shell,
+            session.sandbox_network,
+            stop_flag,
+        )
+        .await;
+    }
     let workspace = if session.workspace.trim().is_empty() { None } else { Some(session.workspace.as_str()) };
     if let Some(result) = skills::maybe_execute(app_handle, name, args, workspace) {
         return result;
@@ -457,7 +487,18 @@ pub(crate) async fn execute_tool(
             return omniroute::web_fetch(&cfg, url, provider).await;
         }
     }
-    tools::execute(&session.workspace, name, args)
+    // Everything left (read_file/write_file/edit_file/apply_patch/
+    // search_code/find_files/list_dir) is synchronous, blocking I/O —
+    // moved off the async runtime's worker threads via spawn_blocking so a
+    // slow directory walk or a big file write can't stall every other
+    // session's turn loop (and every sub-agent's) running on the same
+    // runtime alongside it.
+    let workspace = session.workspace.clone();
+    let name = name.to_string();
+    let args = args.clone();
+    tokio::task::spawn_blocking(move || tools::execute(&workspace, &name, &args))
+        .await
+        .unwrap_or_else(|e| Err(format!("tool task panicked: {}", e)))
 }
 
 /// Handles one tool call end to end: emits the "start" event, gates behind
@@ -584,6 +625,56 @@ pub async fn run_turn_with_stop(
     result
 }
 
+/// Streams one assistant turn (one model call) and forwards deltas to the
+/// frontend as they arrive, same as before — pulled out into its own
+/// function so run_turn_inner can call it a second time after a forced
+/// compaction (see context::is_context_length_error) without duplicating
+/// the event-emission wiring. On error, also emits the message-cancel event
+/// for the streaming bubble it started, since nothing else will finalize it
+/// for a request that never got a chance to produce a message. Returns the
+/// request_id alongside the result because the caller needs it either way:
+/// to finalize the bubble on success, or to know which id it already
+/// cancelled on failure.
+async fn stream_assistant_turn(
+    app_handle: &tauri::AppHandle,
+    cfg: &config::OmniRouteConfig,
+    session_id: &str,
+    request_messages: &[ChatMessage],
+    tools_schema: Option<&Value>,
+) -> (String, Result<ChatMessage, String>) {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let _ = app_handle.emit_all(
+        "agent://message-start",
+        MessageStartEvent { session_id, request_id: &request_id, role: "assistant" },
+    );
+
+    let delta_app_handle = app_handle.clone();
+    let delta_session_id = session_id.to_string();
+    let delta_request_id = request_id.clone();
+    let result = omniroute::chat_completion_stream(
+        cfg,
+        MODEL,
+        request_messages,
+        tools_schema,
+        move |delta: &str| {
+            let _ = delta_app_handle.emit_all(
+                "agent://message-delta",
+                MessageDeltaEvent { session_id: &delta_session_id, request_id: &delta_request_id, delta },
+            );
+        },
+    )
+    .await;
+
+    if result.is_err() {
+        let _ = app_handle.emit_all(
+            "agent://message-cancel",
+            MessageCancelEvent { session_id, request_id: &request_id },
+        );
+    }
+
+    (request_id, result)
+}
+
 async fn run_turn_inner(
     app_handle: &tauri::AppHandle,
     approvals: tauri::State<'_, PendingApprovals>,
@@ -642,6 +733,7 @@ async fn run_turn_inner(
             .cloned()
             .unwrap_or_default();
         all.extend(skills::tool_definitions().as_array().cloned().unwrap_or_default());
+        all.extend(plan::tool_definitions().as_array().cloned().unwrap_or_default());
         if github::load_token(app_handle).is_some() {
             all.extend(github::tool_definitions().as_array().cloned().unwrap_or_default());
         }
@@ -747,45 +839,57 @@ async fn run_turn_inner(
             return Ok(());
         }
 
-        let mut request_messages = vec![ChatMessage {
+        // A single long turn (hundreds of steps working through one big
+        // task) needs its own history kept in budget throughout, not just
+        // checked once at the top of run_turn — so this runs every step.
+        // Cheap no-op once the session is well under budget.
+        if context::maybe_compact(&cfg, &mut session.messages, false).await {
+            sessions::save(app_handle, &session);
+        }
+
+        let plan_items = plan::load(app_handle, session_id);
+        let plan_message = plan::render(&plan_items).map(|text| ChatMessage {
             role: "system".into(),
-            content: Some(system_prompt.clone()),
+            content: Some(text),
             ..Default::default()
-        }];
-        request_messages.extend(skill_messages.clone());
-        request_messages.extend(session.messages.clone());
+        });
 
-        // Each model turn gets its own id so the frontend can match the
-        // "start"/"delta" events below to the right streaming bubble, even
-        // though several turns can happen in one run_turn call (one per
-        // tool round).
-        let request_id = uuid::Uuid::new_v4().to_string();
-        let _ = app_handle.emit_all(
-            "agent://message-start",
-            MessageStartEvent { session_id, request_id: &request_id, role: "assistant" },
-        );
+        let build_messages = |session: &Session| {
+            let mut msgs = vec![ChatMessage {
+                role: "system".into(),
+                content: Some(system_prompt.clone()),
+                ..Default::default()
+            }];
+            msgs.extend(skill_messages.clone());
+            msgs.extend(plan_message.clone());
+            msgs.extend(session.messages.clone());
+            msgs
+        };
+        let request_messages = build_messages(&session);
 
-        let delta_app_handle = app_handle.clone();
-        let delta_session_id = session_id.to_string();
-        let delta_request_id = request_id.clone();
-        let assistant_msg = omniroute::chat_completion_stream(
-            &cfg,
-            MODEL,
-            &request_messages,
-            tools_schema.as_ref(),
-            move |delta: &str| {
-                let _ = delta_app_handle.emit_all(
-                    "agent://message-delta",
-                    MessageDeltaEvent {
-                        session_id: &delta_session_id,
-                        request_id: &delta_request_id,
-                        delta,
-                    },
-                );
-            },
-        )
-        .await?;
+        let (mut request_id, mut stream_result) =
+            stream_assistant_turn(app_handle, &cfg, session_id, &request_messages, tools_schema.as_ref()).await;
 
+        if let Err(e) = &stream_result {
+            if context::is_context_length_error(e) {
+                // Backstop: the per-step compaction above should normally
+                // keep this from happening at all, but the token estimate
+                // is just that — an estimate — so on an actual
+                // context-length rejection from the backend, force a
+                // compaction regardless of the estimate and retry exactly
+                // once before giving up.
+                if context::maybe_compact(&cfg, &mut session.messages, true).await {
+                    sessions::save(app_handle, &session);
+                    let retry_messages = build_messages(&session);
+                    let (rid2, res2) =
+                        stream_assistant_turn(app_handle, &cfg, session_id, &retry_messages, tools_schema.as_ref()).await;
+                    request_id = rid2;
+                    stream_result = res2;
+                }
+            }
+        }
+
+        let assistant_msg = stream_result?;
         session.messages.push(assistant_msg.clone());
 
         let tool_calls = assistant_msg.tool_calls.clone().unwrap_or_default();

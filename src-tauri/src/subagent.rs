@@ -3,8 +3,10 @@ use std::sync::Arc;
 
 use crate::agent::{self, PendingApprovals, StopRequests, SessionStop, LoopDetector};
 use crate::config;
+use crate::context;
 use crate::github;
 use crate::omniroute::{self, ChatMessage};
+use crate::plan;
 use crate::prompts;
 use crate::sessions::Session;
 use crate::skills;
@@ -94,6 +96,14 @@ pub(crate) async fn run(
         }
     }
 
+    // Same durable plan the parent (and any sibling sub-agent) sees — see
+    // plan.rs — so a sub-agent picking up mid-task on a long-running job
+    // knows what's already been marked done rather than re-deriving it
+    // from scratch, and can check steps off as it completes them too.
+    if let Some(plan_text) = plan::render(&plan::load(app_handle, &session.id)) {
+        messages.push(ChatMessage { role: "system".into(), content: Some(plan_text), ..Default::default() });
+    }
+
     messages.push(ChatMessage {
         role: "user".into(),
         content: Some(task.to_string()),
@@ -104,6 +114,7 @@ pub(crate) async fn run(
     // sub-agents don't spawn further sub-agents. One level of nesting only.
     let mut tool_list: Vec<Value> = tools::tool_definitions().as_array().cloned().unwrap_or_default();
     tool_list.extend(skills::tool_definitions().as_array().cloned().unwrap_or_default());
+    tool_list.extend(plan::tool_definitions().as_array().cloned().unwrap_or_default());
     if github::load_token(app_handle).is_some() {
         tool_list.extend(github::tool_definitions().as_array().cloned().unwrap_or_default());
     }
@@ -145,8 +156,22 @@ pub(crate) async fn run(
 
         step_count += 1;
 
-        let assistant_msg =
-            omniroute::chat_completion(&cfg, agent::MODEL, &messages, Some(&tools_value)).await?;
+        // A delegated task can itself run for hundreds of steps (see
+        // context.rs) — same per-step budget check the top-level loop
+        // does, just against this sub-agent's own local `messages`.
+        context::maybe_compact(&cfg, &mut messages, false).await;
+
+        let assistant_msg = match omniroute::chat_completion(&cfg, agent::MODEL, &messages, Some(&tools_value)).await {
+            Ok(m) => m,
+            Err(e) if context::is_context_length_error(&e) => {
+                if context::maybe_compact(&cfg, &mut messages, true).await {
+                    omniroute::chat_completion(&cfg, agent::MODEL, &messages, Some(&tools_value)).await?
+                } else {
+                    return Err(e);
+                }
+            }
+            Err(e) => return Err(e),
+        };
         messages.push(assistant_msg.clone());
 
         let tool_calls = assistant_msg.tool_calls.clone().unwrap_or_default();
