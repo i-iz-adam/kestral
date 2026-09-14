@@ -66,7 +66,6 @@
   flex-shrink: 0;
   z-index: 9999;
   position: relative;
-  -webkit-app-region: drag;
 }
 
 .titlebar-brand {
@@ -75,7 +74,6 @@
   gap: 8px;
   padding-left: 12px;
   height: 100%;
-  -webkit-app-region: drag;
 }
 
 .titlebar-logo {
@@ -98,14 +96,12 @@
 .titlebar-center {
   flex: 1;
   height: 100%;
-  -webkit-app-region: drag;
 }
 
 .titlebar-controls {
   display: flex;
   align-items: center;
   height: 100%;
-  -webkit-app-region: no-drag;
 }
 
 /* Individual Window Control Button Base */

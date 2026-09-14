@@ -62,7 +62,7 @@ export default function Titlebar() {
   };
 
   const handleMouseDown = async (e: MouseEvent) => {
-    if (e.button === 0) {
+    if (e.button === 0 && e.detail === 1) {
       try {
         await appWindow.startDragging();
       } catch (err) {
