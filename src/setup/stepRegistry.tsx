@@ -5,6 +5,7 @@ import OmniRouteConfig from "./steps/OmniRouteConfig";
 import Defaults from "./steps/Defaults";
 import Workspace from "./steps/Workspace";
 import PythonSetup from "./steps/PythonSetup";
+import InstallerStep from "./steps/InstallerStep";
 import Finish from "./steps/Finish";
 import Stop from "./steps/Stop";
 
@@ -19,5 +20,6 @@ export const stepComponents: Record<string, ComponentType<StepProps>> = {
   workspace: Workspace,
   python: PythonSetup,
   stop: Stop,
+  installer: InstallerStep,
   finish: Finish,
 };

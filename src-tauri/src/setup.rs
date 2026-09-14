@@ -28,7 +28,8 @@ pub fn step_registry() -> Vec<SetupStepDef> {
         SetupStepDef { id: "defaults".into(), order: 3 },
         SetupStepDef { id: "python".into(), order: 4 },
         SetupStepDef { id: "stop".into(), order: 5 },
-        SetupStepDef { id: "finish".into(), order: 6 },
+        SetupStepDef { id: "installer".into(), order: 6 },
+        SetupStepDef { id: "finish".into(), order: 7 },
     ]
 }
 

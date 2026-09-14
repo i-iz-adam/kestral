@@ -14,6 +14,7 @@ mod setup;
 mod skills;
 mod subagent;
 mod tools;
+mod updater;
 
 // ---- setup wizard ----
 
@@ -567,7 +568,10 @@ fn main() {
             stop_engine,
             confirm_engine_running,
             get_engine_config,
-            save_engine_config
+            save_engine_config,
+            updater::check_app_update,
+            updater::download_and_install_update,
+            updater::run_custom_installer
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

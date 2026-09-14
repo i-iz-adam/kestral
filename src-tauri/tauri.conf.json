@@ -40,7 +40,20 @@
         "icons/128x128.png",
         "icons/128x128@2x.png",
         "icons/icon.ico"
-      ]
+      ],
+      "windows": {
+        "certificateThumbprint": null,
+        "digestAlgorithm": "sha256",
+        "timestampUrl": ""
+      }
+    },
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/i-iz-adam/kestral/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "pubkey": ""
     },
     "security": {
       "csp": null
