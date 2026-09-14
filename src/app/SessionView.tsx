@@ -15,6 +15,7 @@ import {
   ensureAgentEventsStarted,
   loadSession,
   markSendingStart,
+  markSendingFailed,
   mutateSessionLocally,
   pushSystemNote as storePushSystemNote,
 } from "./agentStore";
@@ -140,13 +141,53 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   };
 
+  // Downscales attached images before they ever hit Tauri IPC or the
+  // LLM payload — a raw screenshot data-URL is multiple MB of base64,
+  // which risks IPC/serialization failure (a rejected `send_message`
+  // invoke with no `turn-end` used to wedge `sending` on forever) and
+  // oversized chat-completion bodies. Vision models gain nothing past
+  // ~1568px on the long edge, so this is pure overhead removed.
+  const MAX_IMAGE_DIM = 1568;
+
+  const downscaleDataUrl = (dataUrl: string): Promise<string> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(img.width, img.height));
+        if (scale >= 1) {
+          resolve(dataUrl);
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        // Keep PNG for transparency-safe images, otherwise JPEG is ~5x smaller.
+        const outMime = dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg";
+        try {
+          resolve(canvas.toDataURL(outMime, 0.85));
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+
   const processFiles = (files: FileList | File[]) => {
     Array.from(files).forEach((file) => {
       if (file.type.startsWith("image/")) {
         const reader = new FileReader();
         reader.onload = (e) => {
           if (e.target?.result) {
-            setAttachedImages((prev) => [...prev, e.target!.result as string]);
+            void downscaleDataUrl(e.target.result as string).then((dataUrl) => {
+              setAttachedImages((prev) => [...prev, dataUrl]);
+            });
           }
         };
         reader.readAsDataURL(file);
@@ -183,7 +224,9 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
 
     markSendingStart(sessionId);
-    invoke("send_message", { sessionId, message: text, images: imgs.length > 0 ? imgs : null }).catch(() => {});
+    invoke("send_message", { sessionId, message: text, images: imgs.length > 0 ? imgs : null }).catch((e) => {
+      markSendingFailed(sessionId, e);
+    });
   };
 
   // The Stop button's handler — the backend sets a stop flag for the

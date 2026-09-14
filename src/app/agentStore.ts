@@ -166,6 +166,24 @@ export function markSendingStart(sessionId: string) {
   notifyAny();
 }
 
+/** Clears a stuck `sending` state when the `send_message` invoke itself
+ * rejects (IPC/serialization failure, backend panic before any
+ * `agent://turn-end` fires). Without this the composer blocks every
+ * follow-up send forever and the failure is invisible — the previous
+ * `.catch(() => {})` swallowed it. */
+export function markSendingFailed(sessionId: string, error: unknown) {
+  const rec = getRecord(sessionId);
+  const detail = error instanceof Error ? error.message : String(error);
+  patch(sessionId, {
+    sending: false,
+    timeline: [
+      ...rec.timeline,
+      { kind: "message", key: nextKey("err"), role: "system", content: `Error: ${detail}`, streaming: false },
+    ],
+  });
+  notifyAny();
+}
+
 export function pushSystemNote(sessionId: string, text: string) {
   const rec = getRecord(sessionId);
   patch(sessionId, {
