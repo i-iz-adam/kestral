@@ -653,6 +653,15 @@ async fn run_turn_inner(
             all.extend(subagent::tool_definitions().as_array().cloned().unwrap_or_default());
         }
 
+        if !tools::check_python_status().installed {
+            all.retain(|t| {
+                t.get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    != Some("run_python")
+            });
+        }
+
         Some(Value::Array(all))
     };
 

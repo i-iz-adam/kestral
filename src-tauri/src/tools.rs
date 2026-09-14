@@ -225,6 +225,51 @@ pub fn is_mutating(tool_name: &str) -> bool {
     matches!(tool_name, "write_file" | "edit_file" | "apply_patch" | "run_shell")
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PythonStatus {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub binary: Option<String>,
+}
+
+pub fn check_python_status() -> PythonStatus {
+    let check = |bin: &str| -> Option<String> {
+        let output = std::process::Command::new(bin)
+            .arg("--version")
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let ver = String::from_utf8_lossy(&output.stdout);
+            let ver_err = String::from_utf8_lossy(&output.stderr);
+            let combined = if ver.trim().is_empty() { ver_err } else { ver };
+            Some(combined.trim().to_string())
+        } else {
+            None
+        }
+    };
+
+    if let Some(v) = check("python3") {
+        return PythonStatus {
+            installed: true,
+            version: Some(v),
+            binary: Some("python3".to_string()),
+        };
+    }
+    if let Some(v) = check("python") {
+        return PythonStatus {
+            installed: true,
+            version: Some(v),
+            binary: Some("python".to_string()),
+        };
+    }
+
+    PythonStatus {
+        installed: false,
+        version: None,
+        binary: None,
+    }
+}
+
 pub fn is_mutating_with_args(tool_name: &str, args: &Value) -> bool {
     if tool_name == "run_python" {
         return args.get("workspace_access").and_then(|v| v.as_bool()).unwrap_or(false);
