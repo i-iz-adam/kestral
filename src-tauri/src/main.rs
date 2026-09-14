@@ -85,6 +85,18 @@ fn remove_workspace(app_handle: tauri::AppHandle, id: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+async fn fetch_omniroute_endpoint(
+    app_handle: tauri::AppHandle,
+    endpoint: String,
+    method: Option<String>,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let cfg = config::load_omniroute_config(&app_handle)
+        .ok_or("No OmniRoute config saved yet — finish setup first")?;
+    omniroute::fetch_endpoint(&cfg, &endpoint, method.as_deref(), body.as_ref()).await
+}
+
+#[tauri::command]
 async fn test_omniroute_connection(config: config::OmniRouteConfig) -> Result<bool, String> {
     let base = match config.mode.as_str() {
         "local" => "http://127.0.0.1:20128".to_string(),
@@ -229,7 +241,7 @@ async fn send_message(
 
 #[tauri::command]
 async fn stop_session(
-    app_handle: tauri::AppHandle,
+    _app_handle: tauri::AppHandle,
     approvals: tauri::State<'_, agent::PendingApprovals>,
     stops: tauri::State<'_, agent::StopRequests>,
     session_id: String,
@@ -469,6 +481,7 @@ fn main() {
             list_workspaces,
             add_workspace,
             remove_workspace,
+            fetch_omniroute_endpoint,
             test_omniroute_connection,
             create_session,
             list_sessions,

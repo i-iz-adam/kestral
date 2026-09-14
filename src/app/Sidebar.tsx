@@ -201,7 +201,7 @@ export default function Sidebar({
       <EngineStatusBadge />
 
       <div className="sidebar-nav">
-        <IconRailButton label="Providers" onClick={onOpenProviders}>
+        <IconRailButton label="OmniRoute" onClick={onOpenProviders}>
           <PlugIcon />
         </IconRailButton>
         <IconRailButton label="Skills" onClick={onOpenSkills}>

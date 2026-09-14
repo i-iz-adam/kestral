@@ -45,6 +45,75 @@ fn base_url(cfg: &OmniRouteConfig) -> Result<String, String> {
     }
 }
 
+/// Makes an HTTP request to any OmniRoute endpoint with authentication and base URL resolution handled.
+pub async fn fetch_endpoint(
+    cfg: &OmniRouteConfig,
+    endpoint: &str,
+    method: Option<&str>,
+    body: Option<&Value>,
+) -> Result<Value, String> {
+    let base = base_url(cfg)?;
+    let clean_endpoint = if endpoint.starts_with('/') {
+        endpoint.to_string()
+    } else {
+        format!("/{}", endpoint)
+    };
+    let url = format!("{}{}", base, clean_endpoint);
+
+    let method_str = method.unwrap_or("GET").to_uppercase();
+
+    let build_request = |with_auth: bool| {
+        let client = reqwest::Client::new();
+        let mut req = match method_str.as_str() {
+            "POST" => client.post(&url),
+            "PUT" => client.put(&url),
+            "DELETE" => client.delete(&url),
+            _ => client.get(&url),
+        };
+
+        if with_auth {
+            if let Some(key) = &cfg.api_key {
+                if !key.is_empty() {
+                    req = req.header("Authorization", format!("Bearer {}", key));
+                }
+            }
+        }
+
+        if let Some(b) = body {
+            req = req.json(b);
+        }
+        req
+    };
+
+    let mut resp = build_request(true)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to OmniRoute endpoint {}: {}", clean_endpoint, e))?;
+
+    // If 401 Unauthorized or 403 Forbidden, retry without Auth header
+    // (management / public endpoints may reject inference Bearer keys)
+    if (resp.status().as_u16() == 401 || resp.status().as_u16() == 403) && cfg.api_key.is_some() {
+        if let Ok(retry_resp) = build_request(false).send().await {
+            if retry_resp.status().is_success() {
+                resp = retry_resp;
+            }
+        }
+    }
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(format!("OmniRoute returned {}: {}", status, text));
+    }
+
+    if text.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+
+    serde_json::from_str(&text).or_else(|_| Ok(serde_json::json!({ "text": text })))
+}
+
 /// (id, type, name, arguments) per tool-call index — shared accumulator
 /// shape between the whole-body SSE parser and the incremental streaming
 /// parser, since both reassemble the same fragmented `delta.tool_calls`.
