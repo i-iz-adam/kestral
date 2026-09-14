@@ -26,6 +26,67 @@ fn backoff_delay(attempt: u32) -> Duration {
     Duration::from_millis(500 * 2u64.saturating_pow(attempt))
 }
 
+/// Returns true if the role is a valid OpenAI/OmniRoute LLM completion role.
+/// Used to filter out internal UI/session metadata roles (like `skill-loaded`)
+/// before building HTTP payloads.
+pub fn is_valid_llm_role(role: &str) -> bool {
+    matches!(role, "system" | "user" | "assistant" | "tool" | "function")
+}
+
+/// Formats `ChatMessage` structs into OpenAI-compatible JSON message objects.
+/// Filters out non-standard roles and constructs vision `image_url` parts
+/// when vision is supported, or appends fallback text when vision is disabled.
+pub fn format_messages_for_llm(messages: &[ChatMessage], has_vision: bool) -> Vec<Value> {
+    messages
+        .iter()
+        .filter(|m| is_valid_llm_role(&m.role))
+        .map(|m| {
+            if has_vision && m.images.as_ref().map_or(false, |imgs| !imgs.is_empty()) {
+                let mut content_parts: Vec<Value> = Vec::new();
+                if let Some(text) = &m.content {
+                    if !text.is_empty() {
+                        content_parts.push(serde_json::json!({
+                            "type": "text",
+                            "text": text
+                        }));
+                    }
+                }
+                if let Some(imgs) = &m.images {
+                    for img in imgs {
+                        content_parts.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": img
+                            }
+                        }));
+                    }
+                }
+                let mut obj = serde_json::to_value(m).unwrap_or_default();
+                if let Some(map) = obj.as_object_mut() {
+                    map.insert("content".to_string(), Value::Array(content_parts));
+                    map.remove("images");
+                }
+                obj
+            } else {
+                let mut obj = serde_json::to_value(m).unwrap_or_default();
+                if let Some(map) = obj.as_object_mut() {
+                    if !has_vision && m.images.as_ref().map_or(false, |imgs| !imgs.is_empty()) {
+                        let text = m.content.as_deref().unwrap_or("");
+                        let fallback = if text.is_empty() {
+                            "[Attached image(s) - note: current model does not support vision]".to_string()
+                        } else {
+                            format!("{}\n\n[Attached image(s) - note: current model does not support vision]", text)
+                        };
+                        map.insert("content".to_string(), Value::String(fallback));
+                    }
+                    map.remove("images");
+                }
+                obj
+            }
+        })
+        .collect()
+}
+
 /// OpenAI-compatible chat message. `content` is optional because an
 /// assistant message that only carries tool_calls has no text content.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -319,45 +380,7 @@ pub async fn chat_completion(
     let url = format!("{}/v1/chat/completions", base);
 
     let has_vision = supports_vision(cfg, model).await;
-
-    let formatted_messages: Vec<Value> = messages
-        .iter()
-        .map(|m| {
-            if has_vision && m.images.as_ref().map_or(false, |imgs| !imgs.is_empty()) {
-                let mut content_parts: Vec<Value> = Vec::new();
-                if let Some(text) = &m.content {
-                    if !text.is_empty() {
-                        content_parts.push(serde_json::json!({
-                            "type": "text",
-                            "text": text
-                        }));
-                    }
-                }
-                if let Some(imgs) = &m.images {
-                    for img in imgs {
-                        content_parts.push(serde_json::json!({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": img
-                            }
-                        }));
-                    }
-                }
-                let mut obj = serde_json::to_value(m).unwrap_or_default();
-                if let Some(map) = obj.as_object_mut() {
-                    map.insert("content".to_string(), Value::Array(content_parts));
-                    map.remove("images");
-                }
-                obj
-            } else {
-                let mut obj = serde_json::to_value(m).unwrap_or_default();
-                if let Some(map) = obj.as_object_mut() {
-                    map.remove("images");
-                }
-                obj
-            }
-        })
-        .collect();
+    let formatted_messages = format_messages_for_llm(messages, has_vision);
 
     let mut body = serde_json::json!({
         "model": model,
@@ -450,45 +473,7 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     let url = format!("{}/v1/chat/completions", base);
 
     let has_vision = supports_vision(cfg, model).await;
-
-    let formatted_messages: Vec<Value> = messages
-        .iter()
-        .map(|m| {
-            if has_vision && m.images.as_ref().map_or(false, |imgs| !imgs.is_empty()) {
-                let mut content_parts: Vec<Value> = Vec::new();
-                if let Some(text) = &m.content {
-                    if !text.is_empty() {
-                        content_parts.push(serde_json::json!({
-                            "type": "text",
-                            "text": text
-                        }));
-                    }
-                }
-                if let Some(imgs) = &m.images {
-                    for img in imgs {
-                        content_parts.push(serde_json::json!({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": img
-                            }
-                        }));
-                    }
-                }
-                let mut obj = serde_json::to_value(m).unwrap_or_default();
-                if let Some(map) = obj.as_object_mut() {
-                    map.insert("content".to_string(), Value::Array(content_parts));
-                    map.remove("images");
-                }
-                obj
-            } else {
-                let mut obj = serde_json::to_value(m).unwrap_or_default();
-                if let Some(map) = obj.as_object_mut() {
-                    map.remove("images");
-                }
-                obj
-            }
-        })
-        .collect();
+    let formatted_messages = format_messages_for_llm(messages, has_vision);
 
     let mut body = serde_json::json!({
         "model": model,
@@ -813,4 +798,81 @@ pub async fn web_fetch(
         return Ok(format!("{}\n\n[Content truncated at 50,000 characters]", truncated));
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_llm_role() {
+        assert!(is_valid_llm_role("system"));
+        assert!(is_valid_llm_role("user"));
+        assert!(is_valid_llm_role("assistant"));
+        assert!(is_valid_llm_role("tool"));
+        assert!(is_valid_llm_role("function"));
+
+        assert!(!is_valid_llm_role("skill-loaded"));
+        assert!(!is_valid_llm_role("custom-role"));
+    }
+
+    #[test]
+    fn test_format_messages_for_llm_filters_custom_roles() {
+        let msgs = vec![
+            ChatMessage {
+                role: "system".into(),
+                content: Some("System prompt".into()),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: Some("Help me with image".into()),
+                images: Some(vec!["data:image/png;base64,abc".into()]),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "skill-loaded".into(),
+                content: Some(r#"{"call_id":"123","name":"__skill_loaded__"}"#.into()),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: Some("Here is the answer".into()),
+                ..Default::default()
+            },
+        ];
+
+        let formatted = format_messages_for_llm(&msgs, true);
+        assert_eq!(formatted.len(), 3);
+        assert_eq!(formatted[0]["role"], "system");
+        assert_eq!(formatted[1]["role"], "user");
+        assert_eq!(formatted[2]["role"], "assistant");
+
+        // Verify image conversion for vision model
+        let user_content = &formatted[1]["content"];
+        assert!(user_content.is_array());
+        let parts = user_content.as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "Help me with image");
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,abc");
+    }
+
+    #[test]
+    fn test_format_messages_for_llm_non_vision_fallback() {
+        let msgs = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: Some("Look at this".into()),
+                images: Some(vec!["data:image/png;base64,abc".into()]),
+                ..Default::default()
+            },
+        ];
+
+        let formatted = format_messages_for_llm(&msgs, false);
+        assert_eq!(formatted.len(), 1);
+        assert_eq!(formatted[0]["role"], "user");
+        assert!(formatted[0]["content"].as_str().unwrap().contains("does not support vision"));
+    }
 }

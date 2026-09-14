@@ -887,7 +887,13 @@ async fn run_turn_inner(
             }];
             msgs.extend(skill_messages.clone());
             msgs.extend(plan_message.clone());
-            msgs.extend(session.messages.clone());
+            msgs.extend(
+                session
+                    .messages
+                    .iter()
+                    .filter(|m| omniroute::is_valid_llm_role(&m.role))
+                    .cloned(),
+            );
             msgs
         };
         let request_messages = build_messages(&session);
