@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ToolCallEventPayload } from "../types";
+import { extractImagesFromText, type ExtractedImage } from "./imageUtils";
+import ImageLightboxModal from "./ImageLightboxModal";
 
 /// A short, tool-specific summary of the call's arguments shown inline
 /// next to the tool name — e.g. the path being edited or the query being
@@ -50,6 +52,9 @@ export default function ToolCallRow({
   onApprove: (callId: string, approved: boolean) => void;
 }) {
   const argSummary = summarizeArgs(event.name, event.args);
+  const [selectedImage, setSelectedImage] = useState<ExtractedImage | null>(null);
+
+  const images = event.result ? extractImagesFromText(event.result) : [];
 
   // This component mounts exactly once per call_id, right as the real
   // "start" event arrives (see the stable key in SessionView) — so
@@ -81,6 +86,29 @@ export default function ToolCallRow({
       )}
       {event.result && (
         <pre className="tool-result">{event.result.slice(0, 400)}</pre>
+      )}
+      {images.length > 0 && (
+        <div className="tool-image-previews">
+          {images.map((img, idx) => (
+            <div
+              key={idx}
+              className="tool-image-thumb"
+              onClick={() => setSelectedImage(img)}
+              title={`View ${img.name}`}
+            >
+              <img src={img.src} alt={img.name} />
+              <span className="tool-image-name">{img.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {selectedImage && (
+        <ImageLightboxModal
+          src={selectedImage.src}
+          filename={selectedImage.name}
+          originalPath={selectedImage.originalPath}
+          onClose={() => setSelectedImage(null)}
+        />
       )}
     </div>
   );
