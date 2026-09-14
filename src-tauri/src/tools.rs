@@ -262,10 +262,14 @@ pub struct PythonStatus {
 
 pub fn check_python_status() -> PythonStatus {
     let check = |bin: &str| -> Option<String> {
-        let output = std::process::Command::new(bin)
-            .arg("--version")
-            .output()
-            .ok()?;
+        let mut cmd = std::process::Command::new(bin);
+        cmd.arg("--version");
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        let output = cmd.output().ok()?;
         if output.status.success() {
             let ver = String::from_utf8_lossy(&output.stdout);
             let ver_err = String::from_utf8_lossy(&output.stderr);
@@ -868,7 +872,6 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
 /// of blocking the async runtime with no way to cancel it).
 #[cfg(target_os = "windows")]
 fn tokio_shell_command(command: &str) -> tokio::process::Command {
-    use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let mut cmd = tokio::process::Command::new("powershell");
     cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command]);
@@ -924,11 +927,15 @@ const SANDBOX_IMAGE: &str = "debian:stable-slim";
 /// installed/running can change between one run_shell call and the next
 /// far more plausibly than it changes mid-call.
 async fn docker_available() -> bool {
-    tokio::process::Command::new("docker")
-        .args(["info"])
+    let mut cmd = tokio::process::Command::new("docker");
+    cmd.args(["info"])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd.status()
         .await
         .map(|s| s.success())
         .unwrap_or(false)
@@ -950,6 +957,10 @@ fn sandboxed_shell_command(command: &str, workspace: &str, network: bool) -> tok
     cmd.args(["-v", &format!("{}:/workspace", workspace), "-w", "/workspace"]);
     cmd.arg(SANDBOX_IMAGE);
     cmd.args(["sh", "-c", command]);
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(0x0800_0000);
+    }
     cmd
 }
 
@@ -1058,9 +1069,20 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
     let script_path = working_dir.join("script.py");
     fs::write(&script_path, code).map_err(|e| format!("failed to write python script: {}", e))?;
 
-    let python_bin = if Command::new("python3").arg("--version").output().is_ok() {
+    let check_version = |bin: &str| -> bool {
+        let mut cmd = Command::new(bin);
+        cmd.arg("--version");
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        cmd.output().is_ok()
+    };
+
+    let python_bin = if check_version("python3") {
         "python3"
-    } else if Command::new("python").arg("--version").output().is_ok() {
+    } else if check_version("python") {
         "python"
     } else {
         return Err("Python interpreter ('python3' or 'python') not found on system PATH.".to_string());
