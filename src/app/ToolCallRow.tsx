@@ -39,6 +39,12 @@ function summarizeArgs(name: string, args: unknown): string | null {
       return str(a.pattern) ?? null;
     case "run_shell":
       return str(a.command) ?? null;
+    case "run_python": {
+      const code = str(a.code);
+      if (!code) return null;
+      const firstLine = code.trim().split("\n")[0];
+      return firstLine.length > 50 ? firstLine.slice(0, 50) + "..." : firstLine;
+    }
     default:
       return null;
   }

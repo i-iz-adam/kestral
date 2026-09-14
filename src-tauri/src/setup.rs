@@ -26,8 +26,9 @@ pub fn step_registry() -> Vec<SetupStepDef> {
         SetupStepDef { id: "omniroute".into(), order: 1 },
         SetupStepDef { id: "workspace".into(), order: 2 },
         SetupStepDef { id: "defaults".into(), order: 3 },
-        SetupStepDef { id: "stop".into(), order: 4 },
-        SetupStepDef { id: "finish".into(), order: 5 },
+        SetupStepDef { id: "python".into(), order: 4 },
+        SetupStepDef { id: "stop".into(), order: 5 },
+        SetupStepDef { id: "finish".into(), order: 6 },
     ]
 }
 

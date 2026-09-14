@@ -23,6 +23,11 @@ fn get_pending_setup_steps(app_handle: tauri::AppHandle) -> Vec<setup::SetupStep
 }
 
 #[tauri::command]
+fn check_python_installed() -> tools::PythonStatus {
+    tools::check_python_status()
+}
+
+#[tauri::command]
 fn complete_setup_step(app_handle: tauri::AppHandle, step_id: String) {
     setup::mark_complete(&app_handle, &step_id);
 }
@@ -512,6 +517,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_pending_setup_steps,
             complete_setup_step,
+            check_python_installed,
             get_session_defaults,
             save_session_defaults,
             save_omniroute_config,

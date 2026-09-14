@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
-import { open } from "@tauri-apps/api/dialog";
+import { open as openDialog } from "@tauri-apps/api/dialog";
+import { open as openShell } from "@tauri-apps/api/shell";
 import type { OmniRouteConfigPayload, SessionDefaults, Workspace } from "../types";
+
+export interface PythonStatusPayload {
+  installed: boolean;
+  version?: string | null;
+  binary?: string | null;
+}
 
 export default function Settings() {
   const [mode, setMode] = useState<"local" | "remote">("local");
@@ -21,6 +28,9 @@ export default function Settings() {
   const [defaultSubagents, setDefaultSubagents] = useState(true);
   const [defaultGracefulStop, setDefaultGracefulStop] = useState(true);
   const [defaultsSaved, setDefaultsSaved] = useState(false);
+
+  const [pythonStatus, setPythonStatus] = useState<PythonStatusPayload | null>(null);
+  const [checkingPython, setCheckingPython] = useState(false);
 
   useEffect(() => {
     invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then(
@@ -47,7 +57,21 @@ export default function Settings() {
         setDefaultGracefulStop(defs.graceful_stop ?? true);
       }
     });
+    checkPython();
   }, []);
+
+  const checkPython = () => {
+    setCheckingPython(true);
+    invoke<PythonStatusPayload>("check_python_installed")
+      .then((res) => {
+        setPythonStatus(res);
+        setCheckingPython(false);
+      })
+      .catch(() => {
+        setPythonStatus({ installed: false });
+        setCheckingPython(false);
+      });
+  };
 
   const buildConfig = (): OmniRouteConfigPayload => ({
     mode,
@@ -74,7 +98,7 @@ export default function Settings() {
   };
 
   const addWorkspace = async () => {
-    const selected = await open({ directory: true, multiple: false });
+    const selected = await openDialog({ directory: true, multiple: false });
     if (typeof selected !== "string") return;
     const workspace = await invoke<Workspace>("add_workspace", {
       name: null,
@@ -233,6 +257,38 @@ export default function Settings() {
         >
           {defaultsSaved ? "Saved" : "Save"}
         </button>
+      </section>
+
+      <section>
+        <h3>Python Execution Sandbox</h3>
+        <p className="hint small">
+          Status of Python installation for the <code>run_python</code> execution tool.
+        </p>
+        <div style={{ marginTop: 10 }}>
+          {checkingPython ? (
+            <span className="hint small">Checking Python status...</span>
+          ) : pythonStatus?.installed ? (
+            <div>
+              <span className="ok">Installed ({pythonStatus.version || pythonStatus.binary})</span>
+              <p className="hint small" style={{ marginTop: 4 }}>
+                The <code>run_python</code> tool is verified and enabled for agent use.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <span className="fail">Not Installed</span>
+              <p className="hint small" style={{ marginTop: 4 }}>
+                The <code>run_python</code> tool is disabled until Python is verified on your system PATH.
+              </p>
+              <div className="row" style={{ marginTop: 8 }}>
+                <button onClick={() => openShell("https://www.python.org/downloads/")}>
+                  Download Python
+                </button>
+                <button onClick={checkPython}>Re-check Installation</button>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       <section>
