@@ -1,7 +1,29 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::AsyncReadExt;
+
+use crate::agent::SessionStop;
+
+/// Hard ceiling on how much text a single read_file or run_shell result
+/// carries back into the conversation. Decompiled sources and build logs
+/// can be enormous — left uncapped, one tool result can single-handedly
+/// blow the whole context budget (compounding the context-compaction
+/// problem) or just be too large for the backend to accept at all. Kept
+/// generous enough that this virtually never fires on normal-sized files/
+/// output, but bounded all the same.
+const MAX_TOOL_OUTPUT_CHARS: usize = 40_000;
+
+/// Default and maximum timeout for run_shell. A build/decompile/test
+/// command can legitimately run for minutes; an unbounded wait is what
+/// actually breaks a long session (see run_shell's doc comment below), so
+/// the default is generous but finite, and the model can ask for more, up
+/// to a hard ceiling, for a command it expects to be slow.
+pub(crate) const DEFAULT_SHELL_TIMEOUT_SECS: u64 = 300;
+const MAX_SHELL_TIMEOUT_SECS: u64 = 1800;
 
 /// Directory names skipped entirely by search_code/find_files — build
 /// output, dependency trees, and VCS internals that are almost never what
@@ -36,10 +58,14 @@ pub fn tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read the contents of a text file, relative to the workspace root.",
+                "description": "Read the contents of a text file, relative to the workspace root. Large files are truncated (with a note telling you the total line count) — pass start_line/num_lines to page through the rest instead of re-reading from the top.",
                 "parameters": {
                     "type": "object",
-                    "properties": { "path": { "type": "string" } },
+                    "properties": {
+                        "path": { "type": "string" },
+                        "start_line": { "type": "integer", "description": "1-based line to start from. Defaults to 1." },
+                        "num_lines": { "type": "integer", "description": "Max lines to return from start_line. Defaults to enough to fill the output cap." }
+                    },
                     "required": ["path"]
                 }
             }
@@ -161,10 +187,13 @@ pub fn tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Run a shell command inside the workspace root and return its stdout/stderr. On macOS/Linux this runs via 'sh -c'; on Windows it runs via PowerShell (not cmd.exe), which does have 'ls', 'cat', 'cp', 'mv', 'rm', 'pwd', and 'echo' as built-in aliases, but not 'grep' or Unix-style 'find' — use search_code/find_files instead of piping through grep/find, and prefer read_file/edit_file/apply_patch over cat/redirection for reading or changing files, since those work identically on every platform. Quote arguments the way the target shell expects (e.g. a git commit message must be one quoted argument to -m — an unquoted multi-word message gets split into extra pathspec arguments and fails).",
+                "description": "Run a shell command inside the workspace root and return its stdout/stderr. On macOS/Linux this runs via 'sh -c'; on Windows it runs via PowerShell (not cmd.exe), which does have 'ls', 'cat', 'cp', 'mv', 'rm', 'pwd', and 'echo' as built-in aliases, but not 'grep' or Unix-style 'find' — use search_code/find_files instead of piping through grep/find, and prefer read_file/edit_file/apply_patch over cat/redirection for reading or changing files, since those work identically on every platform. Quote arguments the way the target shell expects (e.g. a git commit message must be one quoted argument to -m — an unquoted multi-word message gets split into extra pathspec arguments and fails). The command is killed if it doesn't finish within the timeout (default 5 minutes) — pass a larger timeout_seconds for something you expect to be slow (a full build, a test suite, a decompile pass), up to 30 minutes; very large stdout/stderr is truncated (head and tail kept) rather than returned in full.",
                 "parameters": {
                     "type": "object",
-                    "properties": { "command": { "type": "string" } },
+                    "properties": {
+                        "command": { "type": "string" },
+                        "timeout_seconds": { "type": "integer", "description": "Max time to let the command run before it's killed. Defaults to 300, capped at 1800." }
+                    },
                     "required": ["command"]
                 }
             }
@@ -294,6 +323,28 @@ fn glob_match(pattern: &str, text: &str) -> bool {
         p += 1;
     }
     p == pat.len()
+}
+
+/// Caps `s` to at most `max_chars`, keeping the head and appending a note
+/// with the omitted byte count — used for run_shell output, where the
+/// most recent lines (often where a build error actually shows up) are at
+/// least as important as the first ones, so this keeps head *and* tail
+/// rather than just truncating from the end.
+fn cap_head_tail(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    let half = max_chars / 2;
+    let head: String = s.chars().take(half).collect();
+    let tail: String = s.chars().skip(total - half).collect();
+    format!(
+        "{}\n\n... [{} characters omitted — output was {} characters total] ...\n\n{}",
+        head,
+        total - max_chars,
+        total,
+        tail
+    )
 }
 
 fn relative_display_path(workspace: &str, path: &Path) -> String {
@@ -466,33 +517,6 @@ fn apply_file_hunks(workspace: &str, fh: &FileHunks) -> Result<String, String> {
     ))
 }
 
-/// Builds the child process for run_shell, platform-appropriate.
-///
-/// On Windows this runs via PowerShell rather than cmd.exe — PowerShell
-/// has 'ls'/'cat'/'cp'/'mv'/'rm'/'pwd'/'echo' as built-in aliases, which
-/// cmd.exe has none of, so a model reaching for those (as it naturally
-/// will, having learned on Unix shells) doesn't just fail outright. It
-/// also sets CREATE_NO_WINDOW so approving a shell call doesn't flash a
-/// console window on screen for a moment, which — with no console
-/// attached at all — is otherwise the default behavior for any child
-/// console process spawned from a GUI app on Windows.
-#[cfg(target_os = "windows")]
-fn shell_command(command: &str) -> Command {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut cmd = Command::new("powershell");
-    cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command]);
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd
-}
-
-#[cfg(not(target_os = "windows"))]
-fn shell_command(command: &str) -> Command {
-    let mut cmd = Command::new("sh");
-    cmd.args(["-c", command]);
-    cmd
-}
-
 pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, String> {
     match name {
         "read_file" => {
@@ -501,7 +525,38 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
                 .and_then(|v| v.as_str())
                 .ok_or("missing path")?;
             let full = resolve_path(workspace, path)?;
-            fs::read_to_string(&full).map_err(|e| e.to_string())
+            let content = fs::read_to_string(&full).map_err(|e| e.to_string())?;
+
+            let start_line = args.get("start_line").and_then(|v| v.as_u64()).unwrap_or(1).max(1) as usize;
+            let explicit_range = args.get("start_line").is_some() || args.get("num_lines").is_some();
+
+            if explicit_range {
+                let total_lines = content.lines().count();
+                let num_lines = args
+                    .get("num_lines")
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as usize)
+                    .unwrap_or(usize::MAX);
+                let selected: String = content
+                    .lines()
+                    .skip(start_line - 1)
+                    .take(num_lines)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let end_line = (start_line + selected.lines().count()).saturating_sub(1);
+                let body = cap_head_tail(&selected, MAX_TOOL_OUTPUT_CHARS);
+                Ok(format!("[lines {}-{} of {} total]\n{}", start_line, end_line, total_lines, body))
+            } else if content.chars().count() > MAX_TOOL_OUTPUT_CHARS {
+                let total_lines = content.lines().count();
+                let shown: String = content.chars().take(MAX_TOOL_OUTPUT_CHARS).collect();
+                let shown_lines = shown.lines().count();
+                Ok(format!(
+                    "{}\n\n... [truncated after {} of {} lines ({} characters total) — pass start_line: {} to continue reading]",
+                    shown, shown_lines, total_lines, content.chars().count(), shown_lines + 1
+                ))
+            } else {
+                Ok(content)
+            }
         }
         "write_file" => {
             let path = args
@@ -710,19 +765,204 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
             }
             Ok(entries.join("\n"))
         }
-        "run_shell" => {
-            let command = args
-                .get("command")
-                .and_then(|v| v.as_str())
-                .ok_or("missing command")?;
-            let output = shell_command(command)
-                .current_dir(workspace)
-                .output()
-                .map_err(|e| e.to_string())?;
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Ok(format!("stdout:\n{}\nstderr:\n{}", stdout, stderr))
-        }
+        // Handled separately by run_shell_async — see agent::execute_tool,
+        // which intercepts "run_shell" before reaching this synchronous
+        // dispatcher, since it needs real async cancellation (a timeout and
+        // a kill path) that this function's synchronous, blocking-friendly
+        // callers (see spawn_blocking in agent.rs) can't provide.
+        "run_shell" => Err("run_shell must be dispatched via run_shell_async".to_string()),
         _ => Err(format!("unknown tool: {}", name)),
     }
+}
+
+/// Builds the child process for run_shell, platform-appropriate, tokio
+/// variant (mirrors `shell_command` above but for tokio::process::Command,
+/// which is what lets run_shell_async actually kill a hung child instead
+/// of blocking the async runtime with no way to cancel it).
+#[cfg(target_os = "windows")]
+fn tokio_shell_command(command: &str) -> tokio::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut cmd = tokio::process::Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command]);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(not(target_os = "windows"))]
+fn tokio_shell_command(command: &str) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.args(["-c", command]);
+    cmd
+}
+
+/// Reads `pipe` to completion (so the child process is never left blocked
+/// on a full pipe buffer), keeping only the first `cap` bytes' worth of
+/// text — draining the rest without holding onto it, so a runaway build
+/// log doesn't balloon memory even though we still read all of it.
+async fn drain_capped<R: tokio::io::AsyncRead + Unpin>(mut pipe: R, cap: usize) -> (String, usize) {
+    let mut kept = Vec::with_capacity(cap.min(1 << 16));
+    let mut total = 0usize;
+    let mut buf = [0u8; 8192];
+    loop {
+        match pipe.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => {
+                total += n;
+                if kept.len() < cap {
+                    let take = (cap - kept.len()).min(n);
+                    kept.extend_from_slice(&buf[..take]);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    (String::from_utf8_lossy(&kept).to_string(), total)
+}
+
+/// The image used for sandbox_shell. Deliberately a stock, widely-cached
+/// Debian base rather than a bespoke Kestrel-maintained image — it has a
+/// real shell and coreutils, which covers plenty of workspace inspection
+/// and scripting, but nothing else preinstalled. A task whose sandboxed
+/// commands need a toolchain (a JDK, Gradle, a decompiler) should install
+/// it inside the sandbox first (with sandbox_network on) — see the
+/// decompilation skill, which spells this out for that specific workflow —
+/// rather than this being baked into the image itself, which would mean
+/// silently maintaining and trusting a much larger attack surface for
+/// every sandboxed session whether it needs a JDK or not.
+const SANDBOX_IMAGE: &str = "debian:stable-slim";
+
+/// True if the `docker` binary is on PATH and the daemon actually responds
+/// — checked fresh each call rather than cached, since whether Docker is
+/// installed/running can change between one run_shell call and the next
+/// far more plausibly than it changes mid-call.
+async fn docker_available() -> bool {
+    tokio::process::Command::new("docker")
+        .args(["info"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Builds the sandboxed variant of the command: the workspace bind-mounted
+/// read-write at /workspace (and nowhere else on the host reachable at
+/// all), network disabled unless `network` is set, capabilities dropped,
+/// and a conservative resource cap so a runaway process inside the sandbox
+/// can't take down the host. `--rm` so nothing lingers after the command
+/// (or the timeout-kill) ends.
+fn sandboxed_shell_command(command: &str, workspace: &str, network: bool) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("docker");
+    cmd.args(["run", "--rm", "-i"]);
+    if !network {
+        cmd.args(["--network", "none"]);
+    }
+    cmd.args(["--cap-drop", "ALL", "--memory", "2g", "--cpus", "2", "--pids-limit", "512"]);
+    cmd.args(["-v", &format!("{}:/workspace", workspace), "-w", "/workspace"]);
+    cmd.arg(SANDBOX_IMAGE);
+    cmd.args(["sh", "-c", command]);
+    cmd
+}
+
+/// Runs a shell command with a real timeout and a real kill path: unlike a
+/// synchronous `Command::output()` call, this can be cancelled — either
+/// because it ran past `timeout` or because the user hit Stop — without
+/// leaving the child process (and whatever it spawned) running forever in
+/// the background with nothing able to reach it. When `sandbox` is set
+/// (see Session::sandbox_shell), runs inside a locked-down container
+/// instead of directly on the host — see sandboxed_shell_command — falling
+/// back to a clear error (not a silent unsandboxed run) if Docker isn't
+/// actually available, since a task that specifically asked for isolation
+/// should never quietly run unisolated instead.
+pub async fn run_shell_async(
+    workspace: &str,
+    command: &str,
+    timeout_secs: u64,
+    sandbox: bool,
+    sandbox_network: bool,
+    stop_flag: Arc<SessionStop>,
+) -> Result<String, String> {
+    let timeout_secs = timeout_secs.clamp(1, MAX_SHELL_TIMEOUT_SECS);
+
+    let mut cmd = if sandbox {
+        if !docker_available().await {
+            return Err(
+                "Sandboxed shell is on for this session but Docker isn't available (not \
+                 installed, or the daemon isn't running) — install/start Docker, or turn off \
+                 the sandbox for this session to run commands directly on the host instead."
+                    .to_string(),
+            );
+        }
+        sandboxed_shell_command(command, workspace, sandbox_network)
+    } else {
+        tokio_shell_command(command)
+    };
+    if !sandbox {
+        cmd.current_dir(workspace);
+    }
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    cmd.kill_on_drop(true);
+
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let stderr_pipe = child.stderr.take().expect("stderr was piped");
+
+    let stdout_task = tokio::spawn(drain_capped(stdout_pipe, MAX_TOOL_OUTPUT_CHARS / 2));
+    let stderr_task = tokio::spawn(drain_capped(stderr_pipe, MAX_TOOL_OUTPUT_CHARS / 2));
+
+    // A single wait that resolves on whichever comes first: the child
+    // exiting, the timeout elapsing, or the user hitting Stop (checked in
+    // small increments by sleep_till_stop_or — see agent::SessionStop) —
+    // so a hung build both times out on its own AND can be killed on
+    // demand, instead of the Stop button being unable to reach it at all.
+    let outcome = tokio::select! {
+        status = child.wait() => {
+            if let Err(e) = status {
+                return Err(format!("failed to wait on child process: {}", e));
+            }
+            Outcome::Finished
+        }
+        _ = stop_flag.sleep_till_stop_or(Duration::from_secs(timeout_secs)) => {
+            if stop_flag.is_requested() { Outcome::Stopped } else { Outcome::TimedOut }
+        }
+    };
+
+    let killed_for = match &outcome {
+        Outcome::TimedOut => Some("timed out"),
+        Outcome::Stopped => Some("stopped by user"),
+        Outcome::Finished => None,
+    };
+    if killed_for.is_some() {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
+
+    let (stdout, stdout_total) = stdout_task.await.unwrap_or_default();
+    let (stderr, stderr_total) = stderr_task.await.unwrap_or_default();
+    let stdout = if stdout_total > stdout.len() {
+        format!("{}\n... [{} more characters omitted]", stdout, stdout_total - stdout.len())
+    } else {
+        stdout
+    };
+    let stderr = if stderr_total > stderr.len() {
+        format!("{}\n... [{} more characters omitted]", stderr, stderr_total - stderr.len())
+    } else {
+        stderr
+    };
+
+    match killed_for {
+        Some(reason) => Ok(format!(
+            "[process {reason} after {timeout_secs}s and was killed]\nstdout so far:\n{stdout}\nstderr so far:\n{stderr}"
+        )),
+        None => Ok(format!("stdout:\n{}\nstderr:\n{}", stdout, stderr)),
+    }
+}
+
+enum Outcome {
+    Finished,
+    TimedOut,
+    Stopped,
 }
