@@ -101,19 +101,24 @@ pub async fn install(app_handle: tauri::AppHandle) {
         return;
     }
 
-    let mut child = match tokio::process::Command::new("npm")
-        .args([
-            "install",
-            "omniroute",
-            "--prefix",
-            &dir.to_string_lossy(),
-            "--no-audit",
-            "--no-fund",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    let mut cmd = tokio::process::Command::new("npm");
+    cmd.args([
+        "install",
+        "omniroute",
+        "--prefix",
+        &dir.to_string_lossy(),
+        "--no-audit",
+        "--no-fund",
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+
+    #[cfg(target_os = "windows")]
     {
+        cmd.creation_flags(0x0800_0000);
+    }
+
+    let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             let _ = app_handle.emit_all(
@@ -207,13 +212,20 @@ pub fn start(app_handle: tauri::AppHandle) {
         ("sh", "-c")
     };
 
-    let spawn_result = Command::new(shell)
-        .arg(shell_flag)
+    let mut cmd = Command::new(shell);
+    cmd.arg(shell_flag)
         .arg(&full_command)
         .env("DATA_DIR", &data_dir)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+        .stderr(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+
+    let spawn_result = cmd.spawn();
 
     let state = app_handle.state::<EngineState>();
     match spawn_result {
@@ -256,9 +268,11 @@ pub fn stop(app_handle: &tauri::AppHandle) {
         let pid = child.id();
         #[cfg(target_os = "windows")]
         {
-            let _ = Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .status();
+            use std::os::windows::process::CommandExt;
+            let mut cmd = Command::new("taskkill");
+            cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
+            cmd.creation_flags(0x0800_0000);
+            let _ = cmd.status();
         }
         #[cfg(not(target_os = "windows"))]
         {
