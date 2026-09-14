@@ -203,10 +203,14 @@ fn parse_owner_repo(remote_url: &str) -> Option<(String, String)> {
 /// github.com — every one of those is a normal, unremarkable case, not a
 /// failure worth surfacing on its own.
 pub fn repo_for_workspace(workspace: &str) -> Option<(String, String)> {
-    let output = Command::new("git")
-        .args(["-C", workspace, "remote", "get-url", "origin"])
-        .output()
-        .ok()?;
+    let mut cmd = Command::new("git");
+    cmd.args(["-C", workspace, "remote", "get-url", "origin"]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let output = cmd.output().ok()?;
     if !output.status.success() {
         return None;
     }
