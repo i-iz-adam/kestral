@@ -1643,58 +1643,156 @@ button:not(:disabled):hover {
   box-shadow: 0 0 0 3px var(--accent-dim), 0 0 18px -6px var(--accent-glow);
 }
 
-.composer button.primary {
+.composer button.primary.send-btn {
   position: relative;
   overflow: hidden;
-  min-width: 92px;
-  background: linear-gradient(135deg, var(--accent), #7a4fe0);
+  align-self: stretch;
+  min-height: 44px;
+  min-width: 110px;
+  padding: 0 20px;
+  background: linear-gradient(135deg, var(--accent) 0%, #6366f1 50%, #8b5cf6 100%);
+  background-size: 200% 200%;
   border: none;
+  border-radius: 10px;
   color: #fff;
-  font-weight: 500;
-  padding: 0 18px;
-  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   cursor: pointer;
+  box-shadow: 0 4px 14px -2px rgba(99, 102, 241, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: background-position 0.4s var(--ease), transform 0.25s var(--ease), box-shadow 0.25s var(--ease), background 0.3s var(--ease);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
+.composer button.primary.send-btn::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    45deg,
+    transparent 45%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 55%
+  );
+  transform: rotate(30deg) translateX(-100%);
+  transition: transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.composer button.primary.send-btn:hover::before {
+  transform: rotate(30deg) translateX(100%);
+}
+
+.composer button.primary.send-btn:hover:not(:disabled) {
+  background-position: 100% 0;
+  box-shadow: 0 6px 20px 0 rgba(99, 102, 241, 0.55), 0 0 12px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.composer button.primary.send-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.97);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+}
+
+/* Base face alignment */
 .send-btn .face {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  transition: opacity 0.2s var(--ease), transform 0.3s var(--ease);
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.send-btn .face-send {
+/* Send State */
+.send-btn .send-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.send-btn:hover:not(.sending) .send-icon {
+  transform: translate(2px, -2px) scale(1.1);
+}
+
+/* Running State */
+@keyframes gradient-pulse {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes orb-pulse {
+  0%, 100% {
+    transform: scale(0.85);
+    opacity: 0.7;
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+    box-shadow: 0 0 0 6px rgba(56, 189, 248, 0);
+  }
+}
+
+.composer button.primary.send-btn.sending {
+  background: linear-gradient(135deg, #4338ca 0%, #0284c7 50%, #2563eb 100%);
+  background-size: 200% 200%;
+  animation: gradient-pulse 3s ease infinite;
+  box-shadow: 0 4px 18px rgba(2, 132, 199, 0.45), 0 0 10px rgba(67, 56, 202, 0.3);
+}
+
+.send-btn .face-running {
   opacity: 1;
-  transform: translateY(0);
+  transform: scale(1);
 }
 
-.send-btn.sending .face-send {
+.send-btn.sending:hover .face-running {
   opacity: 0;
-  transform: translateY(6px);
+  transform: scale(0.85) translateY(4px);
+  pointer-events: none;
 }
 
+.running-pulse-orb {
+  width: 10px;
+  height: 10px;
+  background: #38bdf8;
+  border-radius: 50%;
+  display: inline-block;
+  animation: orb-pulse 1.4s ease-in-out infinite;
+}
+
+/* Stop State (On Hover when Sending) */
 .send-btn .face-stop {
   position: absolute;
   inset: 0;
   opacity: 0;
-  transform: translateY(-6px);
+  transform: scale(0.85) translateY(-4px);
+  pointer-events: none;
 }
 
-.send-btn.sending .face-stop {
+.send-btn.sending:hover .face-stop {
   opacity: 1;
-  transform: translateY(0);
+  transform: scale(1) translateY(0);
 }
 
-.send-btn .square {
-  width: 10px;
-  height: 10px;
-  fill: currentColor;
-  border-radius: 2px;
+.composer button.primary.send-btn.sending:hover {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%);
+  background-size: 100% 100%;
+  box-shadow: 0 6px 22px rgba(239, 68, 68, 0.65), 0 0 14px rgba(220, 38, 38, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
 }
 
-.composer button.primary.sending {
-  background: linear-gradient(135deg, #e0544a, #b23a34);
+.stop-icon {
+  width: 14px;
+  height: 14px;
 }
 
 @keyframes spring-press {

@@ -500,20 +500,31 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           <button
             className={"primary send-btn" + (sending ? " sending" : "")}
             onClick={sending ? stop : send}
-            title={sending ? "Stop the agent" : "Send message"}
+            title={sending ? "Click to stop agent" : "Send message"}
             aria-label={sending ? "Stop the agent" : "Send message"}
           >
-            <span className="face face-send">{sending ? null : "Send"}</span>
-            <span className="face face-stop">
-              {sending ? (
-                <>
-                  <svg className="square" viewBox="0 0 10 10" aria-hidden="true">
-                    <rect width="10" height="10" />
+            {!sending ? (
+              <span className="face face-send">
+                <svg className="send-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+                <span>Send</span>
+              </span>
+            ) : (
+              <>
+                <span className="face face-running">
+                  <span className="running-pulse-orb" />
+                  <span>Working</span>
+                </span>
+                <span className="face face-stop">
+                  <svg className="stop-icon" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
                   </svg>
-                  Stop
-                </>
-              ) : null}
-            </span>
+                  <span>Stop</span>
+                </span>
+              </>
+            )}
           </button>
         </div>
       </div>

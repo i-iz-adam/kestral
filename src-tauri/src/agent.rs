@@ -921,14 +921,22 @@ async fn run_turn_inner(
         }
 
         let assistant_msg = stream_result?;
-        session.messages.push(assistant_msg.clone());
 
         let tool_calls = assistant_msg.tool_calls.clone().unwrap_or_default();
         let text = assistant_msg.content.clone().unwrap_or_default();
 
+        if text.trim().is_empty() && tool_calls.is_empty() {
+            let _ = app_handle.emit_all(
+                "agent://message-cancel",
+                MessageCancelEvent { session_id, request_id: &request_id },
+            );
+            return Err("Model returned an empty response (no text or tool calls). Please check model/provider configuration and try again.".to_string());
+        }
+
+        session.messages.push(assistant_msg.clone());
+
         if text.is_empty() {
-            // Nothing to show for this turn (it went straight to tools, or
-            // this was a genuinely empty final answer) — drop the
+            // Nothing to show for this turn (it went straight to tools) — drop the
             // placeholder instead of finalizing an empty bubble.
             let _ = app_handle.emit_all(
                 "agent://message-cancel",

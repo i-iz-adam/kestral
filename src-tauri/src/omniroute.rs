@@ -244,39 +244,37 @@ fn accumulate_tool_call_delta(tool_acc: &mut ToolAcc, calls: &[Value]) {
 }
 
 pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
-    let base = match base_url(cfg) {
-        Ok(b) => b,
-        Err(_) => return false,
-    };
-    let url = format!("{}/v1/models", base);
-    let client = reqwest::Client::new();
-    let mut req = client.get(&url);
-    if let Some(key) = &cfg.api_key {
-        if !key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", key));
+    if let Ok(base) = base_url(cfg) {
+        let url = format!("{}/v1/models", base);
+        let client = reqwest::Client::new();
+        let mut req = client.get(&url);
+        if let Some(key) = &cfg.api_key {
+            if !key.is_empty() {
+                req = req.header("Authorization", format!("Bearer {}", key));
+            }
         }
-    }
-    if let Ok(resp) = req.send().await {
-        if resp.status().is_success() {
-            if let Ok(json) = resp.json::<Value>().await {
-                let models_array = json
-                    .get("data")
-                    .or_else(|| json.get("models"))
-                    .and_then(|m| m.as_array());
+        if let Ok(resp) = req.send().await {
+            if resp.status().is_success() {
+                if let Ok(json) = resp.json::<Value>().await {
+                    let models_array = json
+                        .get("data")
+                        .or_else(|| json.get("models"))
+                        .and_then(|m| m.as_array());
 
-                if let Some(models) = models_array {
-                    for m in models {
-                        let id = m.get("id").and_then(|s| s.as_str()).unwrap_or_default();
-                        if id == model {
-                            if let Some(caps) = m.get("capabilities").or_else(|| m.get("supports")) {
-                                if let Some(v) = caps.get("vision").or_else(|| caps.get("multimodal")) {
-                                    if let Some(b) = v.as_bool() {
-                                        return b;
+                    if let Some(models) = models_array {
+                        for m in models {
+                            let id = m.get("id").and_then(|s| s.as_str()).unwrap_or_default();
+                            if id == model {
+                                if let Some(caps) = m.get("capabilities").or_else(|| m.get("supports")) {
+                                    if let Some(v) = caps.get("vision").or_else(|| caps.get("multimodal")) {
+                                        if let Some(b) = v.as_bool() {
+                                            return b;
+                                        }
                                     }
                                 }
-                            }
-                            if let Some(multimodal) = m.get("multimodal").and_then(|v| v.as_bool()) {
-                                return multimodal;
+                                if let Some(multimodal) = m.get("multimodal").and_then(|v| v.as_bool()) {
+                                    return multimodal;
+                                }
                             }
                         }
                     }
@@ -286,6 +284,9 @@ pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
     }
 
     let lower = model.to_lowercase();
+    if lower == "auto" || lower == "auto/vision" || lower == "auto/multimodal" {
+        return true;
+    }
     lower.contains("vision")
         || lower.contains("vl")
         || lower.contains("gpt-4o")
@@ -294,7 +295,6 @@ pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
         || lower.contains("llava")
         || lower.contains("qwen-vl")
         || lower.contains("pixtral")
-        || lower.contains("auto")
 }
 
 fn finish_tool_acc(tool_acc: ToolAcc) -> Option<Vec<ToolCall>> {
@@ -341,7 +341,7 @@ fn parse_sse_response(text: &str) -> Result<ChatMessage, String> {
         let delta = v
             .get("choices")
             .and_then(|c| c.get(0))
-            .and_then(|c| c.get("delta"));
+            .and_then(|c| c.get("delta").or_else(|| c.get("message")));
         if let Some(delta) = delta {
             if let Some(s) = delta.get("content").and_then(|c| c.as_str()) {
                 content.push_str(s);
@@ -555,7 +555,7 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
             let delta = v
                 .get("choices")
                 .and_then(|c| c.get(0))
-                .and_then(|c| c.get("delta"));
+                .and_then(|c| c.get("delta").or_else(|| c.get("message")));
             if let Some(delta) = delta {
                 if let Some(s) = delta.get("content").and_then(|c| c.as_str()) {
                     if !s.is_empty() {
@@ -571,10 +571,37 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     }
 
     if saw_chunk {
+        let tool_calls = finish_tool_acc(tool_acc);
+        if content.is_empty() && tool_calls.is_none() {
+            if let Ok(msg) = parse_sse_response(&raw_buf) {
+                if msg.content.is_some() || msg.tool_calls.is_some() {
+                    if let Some(text) = &msg.content {
+                        if !text.is_empty() {
+                            on_delta(text);
+                        }
+                    }
+                    return Ok(msg);
+                }
+            }
+            if let Ok(json) = serde_json::from_str::<Value>(&raw_buf) {
+                if let Some(choice) = json.get("choices").and_then(|c| c.get(0)) {
+                    if let Some(message) = choice.get("message").or_else(|| choice.get("delta")) {
+                        if let Ok(msg) = serde_json::from_value::<ChatMessage>(message.clone()) {
+                            if let Some(text) = &msg.content {
+                                if !text.is_empty() {
+                                    on_delta(text);
+                                }
+                            }
+                            return Ok(msg);
+                        }
+                    }
+                }
+            }
+        }
         return Ok(ChatMessage {
             role: "assistant".into(),
             content: if content.is_empty() { None } else { Some(content) },
-            tool_calls: finish_tool_acc(tool_acc),
+            tool_calls,
             ..Default::default()
         });
     }
@@ -874,5 +901,19 @@ mod tests {
         assert_eq!(formatted.len(), 1);
         assert_eq!(formatted[0]["role"], "user");
         assert!(formatted[0]["content"].as_str().unwrap().contains("does not support vision"));
+    }
+
+    #[tokio::test]
+    async fn test_supports_vision() {
+        let cfg = OmniRouteConfig::default();
+        assert!(supports_vision(&cfg, "auto").await);
+        assert!(supports_vision(&cfg, "auto/vision").await);
+        assert!(supports_vision(&cfg, "auto/multimodal").await);
+        assert!(supports_vision(&cfg, "claude-3-5-sonnet").await);
+        assert!(supports_vision(&cfg, "gpt-4o").await);
+
+        assert!(!supports_vision(&cfg, "auto/coding").await);
+        assert!(!supports_vision(&cfg, "auto/fast").await);
+        assert!(!supports_vision(&cfg, "deepseek-coder").await);
     }
 }
