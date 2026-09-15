@@ -1,14 +1,8 @@
 import { useEffect, useState, MouseEvent } from "react";
 import { appWindow } from "@tauri-apps/api/window";
-import UpdaterModal from "./UpdaterModal";
-import CustomInstallerModal from "./CustomInstallerModal";
-import { useUpdaterStore } from "./updaterStore";
 
 export default function Titlebar() {
   const [isMaximized, setIsMaximized] = useState(false);
-  const [updaterOpen, setUpdaterOpen] = useState(false);
-  const [installerOpen, setInstallerOpen] = useState(false);
-  const { checking: updateChecking, result: updateResult } = useUpdaterStore();
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -84,78 +78,37 @@ export default function Titlebar() {
   };
 
   return (
-    <>
-      <header
-        className="titlebar"
-        data-tauri-drag-region
-        onMouseDown={handleMouseDown}
-        onDoubleClick={handleDoubleClick}
-      >
-        <div className="titlebar-brand" data-tauri-drag-region>
-          <svg
-            className="titlebar-logo"
-            width="18"
-            height="18"
-            viewBox="0 0 100 100"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <polygon points="30,78 97.5,72.5 90.5,47.5" fill="#9b6bff" fillOpacity="0.6" />
-            <polygon points="30,78 91.0,51.2 79.0,32.8" fill="#9b6bff" fillOpacity="0.9" />
-            <polygon points="30,78 79.2,27.4 64.8,16.6" fill="#e0b45c" />
-          </svg>
-          <span className="titlebar-title" data-tauri-drag-region>
-            Kestrel
-          </span>
-        </div>
-
-        <div className="titlebar-center" data-tauri-drag-region />
-
-        <div
-          className="titlebar-controls"
-          onMouseDown={(e) => e.stopPropagation()}
-          onDoubleClick={(e) => e.stopPropagation()}
+    <header
+      className="titlebar"
+      data-tauri-drag-region
+      onMouseDown={handleMouseDown}
+      onDoubleClick={handleDoubleClick}
+    >
+      <div className="titlebar-brand" data-tauri-drag-region>
+        <svg
+          className="titlebar-logo"
+          width="18"
+          height="18"
+          viewBox="0 0 100 100"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
         >
-          <button
-            type="button"
-            className="titlebar-btn"
-            style={{
-              width: "auto",
-              padding: "0 8px",
-              fontSize: 11,
-              color: updateResult?.has_update ? "#ffffff" : "var(--accent)",
-              backgroundColor: updateResult?.has_update ? "rgba(155,107,255,0.3)" : "transparent",
-              border: updateResult?.has_update ? "1px solid rgba(155,107,255,0.8)" : "1px solid rgba(155,107,255,0.3)",
-              borderRadius: 4,
-              marginRight: 6,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              boxShadow: updateResult?.has_update ? "0 0 8px rgba(155,107,255,0.5)" : "none",
-            }}
-            onClick={() => setUpdaterOpen(true)}
-            title={updateResult?.has_update ? `Update v${updateResult.latest_version} Available` : "Check Updates"}
-          >
-            {updateResult?.has_update ? (
-              <>
-                <span className="update-dot" style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#50fa7b", display: "inline-block" }} />
-                <span>Update Available</span>
-              </>
-            ) : updateChecking ? (
-              "Checking..."
-            ) : (
-              "Update"
-            )}
-          </button>
-          <button
-            type="button"
-            className="titlebar-btn"
-            style={{ width: "auto", padding: "0 8px", fontSize: 11, color: "var(--gold)", border: "1px solid rgba(224,180,92,0.3)", borderRadius: 4, marginRight: 8 }}
-            onClick={() => setInstallerOpen(true)}
-            title="Installer Wizard"
-          >
-            Installer
-          </button>
+          <polygon points="30,78 97.5,72.5 90.5,47.5" fill="#9b6bff" fillOpacity="0.6" />
+          <polygon points="30,78 91.0,51.2 79.0,32.8" fill="#9b6bff" fillOpacity="0.9" />
+          <polygon points="30,78 79.2,27.4 64.8,16.6" fill="#e0b45c" />
+        </svg>
+        <span className="titlebar-title" data-tauri-drag-region>
+          Kestrel
+        </span>
+      </div>
+
+      <div className="titlebar-center" data-tauri-drag-region />
+
+      <div
+        className="titlebar-controls"
+        onMouseDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
         <button
           type="button"
           className="titlebar-btn minimize"
@@ -229,9 +182,5 @@ export default function Titlebar() {
         </button>
       </div>
     </header>
-
-    <UpdaterModal isOpen={updaterOpen} onClose={() => setUpdaterOpen(false)} />
-    <CustomInstallerModal isOpen={installerOpen} onClose={() => setInstallerOpen(false)} />
-    </>
   );
 }
