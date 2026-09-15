@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct UpdateCheckResult {
     pub has_update: bool,
     pub current_version: String,
@@ -28,56 +28,99 @@ pub struct InstallProgressPayload {
     pub completed: bool,
 }
 
+fn parse_version(v: &str) -> Vec<u64> {
+    v.trim_start_matches('v')
+        .split(|c: char| c == '.' || c == '-' || c == '+')
+        .filter_map(|s| s.parse::<u64>().ok())
+        .collect()
+}
+
+pub fn is_version_newer(latest: &str, current: &str) -> bool {
+    let latest_parts = parse_version(latest);
+    let current_parts = parse_version(current);
+    if latest_parts.is_empty() || current_parts.is_empty() {
+        return latest != current && !latest.is_empty();
+    }
+    latest_parts > current_parts
+}
+
 #[tauri::command]
-pub async fn check_app_update(_app_handle: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
-    let current_version = "0.1.0".to_string();
+pub async fn check_app_update(app_handle: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+    let current_version = app_handle.package_info().version.to_string();
     let client = reqwest::Client::builder()
-        .user_agent("kestrel-app/0.1.0")
+        .user_agent(format!("kestrel-app/{}", current_version))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
     let url = "https://api.github.com/repos/i-iz-adam/kestral/releases/latest";
-    match client.get(url).send().await {
-        Ok(response) if response.status().is_success() => {
-            let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-            let tag_name = json["tag_name"].as_str().unwrap_or("").to_string();
-            let latest_version = tag_name.trim_start_matches('v').to_string();
-            let release_name = json["name"].as_str().unwrap_or("").to_string();
-            let release_notes = json["body"].as_str().unwrap_or("").to_string();
-            let published_at = json["published_at"].as_str().unwrap_or("").to_string();
-            
-            let download_url = json["assets"]
-                .as_array()
-                .and_then(|assets| assets.first())
-                .and_then(|asset| asset["browser_download_url"].as_str())
-                .unwrap_or("")
-                .to_string();
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send update check request: {}", e))?;
 
-            let has_update = latest_version != current_version && !latest_version.is_empty();
+    if !response.status().is_success() {
+        return Err(format!(
+            "GitHub release API returned status {}",
+            response.status()
+        ));
+    }
 
-            Ok(UpdateCheckResult {
-                has_update,
-                current_version,
-                latest_version,
-                release_name,
-                release_notes,
-                published_at,
-                download_url,
-            })
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse release response JSON: {}", e))?;
+
+    let tag_name = json["tag_name"].as_str().unwrap_or("").to_string();
+    let latest_version = tag_name.trim_start_matches('v').to_string();
+    let release_name = json["name"].as_str().unwrap_or(&tag_name).to_string();
+    let release_notes = json["body"].as_str().unwrap_or("").to_string();
+    let published_at = json["published_at"].as_str().unwrap_or("").to_string();
+    let html_url = json["html_url"].as_str().unwrap_or("").to_string();
+
+    let target_os = std::env::consts::OS;
+    let mut download_url = "".to_string();
+
+    if let Some(assets) = json["assets"].as_array() {
+        for asset in assets {
+            if let Some(name) = asset["name"].as_str() {
+                let name_lower = name.to_lowercase();
+                let matches_os = match target_os {
+                    "windows" => name_lower.ends_with(".exe") || name_lower.ends_with(".msi"),
+                    "macos" => name_lower.ends_with(".dmg") || name_lower.ends_with(".app.tar.gz") || name_lower.ends_with(".pkg"),
+                    "linux" => name_lower.ends_with(".appimage") || name_lower.ends_with(".deb") || name_lower.ends_with(".rpm"),
+                    _ => false,
+                };
+                if matches_os {
+                    if let Some(url) = asset["browser_download_url"].as_str() {
+                        download_url = url.to_string();
+                        break;
+                    }
+                }
+            }
         }
-        _ => {
-            // Mock fallback
-            Ok(UpdateCheckResult {
-                has_update: true,
-                current_version,
-                latest_version: "0.2.0".to_string(),
-                release_name: "Mock Fallback Release".to_string(),
-                release_notes: "- Added mock update functionality\n- Improved robust logging".to_string(),
-                published_at: "2023-11-20T12:00:00Z".to_string(),
-                download_url: "https://example.com/download".to_string(),
-            })
+        if download_url.is_empty() && !assets.is_empty() {
+            if let Some(url) = assets[0]["browser_download_url"].as_str() {
+                download_url = url.to_string();
+            }
         }
     }
+
+    if download_url.is_empty() {
+        download_url = html_url;
+    }
+
+    let has_update = is_version_newer(&latest_version, &current_version);
+
+    Ok(UpdateCheckResult {
+        has_update,
+        current_version,
+        latest_version,
+        release_name,
+        release_notes,
+        published_at,
+        download_url,
+    })
 }
 
 #[tauri::command]
@@ -139,4 +182,20 @@ pub async fn run_custom_installer(
     }
     
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_version_newer() {
+        assert!(is_version_newer("1.0.2", "1.0.1"));
+        assert!(is_version_newer("1.1.0", "1.0.1"));
+        assert!(is_version_newer("2.0.0", "1.0.1"));
+        assert!(!is_version_newer("1.0.1", "1.0.1"));
+        assert!(!is_version_newer("1.0.0", "1.0.1"));
+        assert!(!is_version_newer("0.9.9", "1.0.1"));
+        assert!(is_version_newer("v1.0.2", "1.0.1"));
+    }
 }

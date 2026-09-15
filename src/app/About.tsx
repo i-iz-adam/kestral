@@ -2,11 +2,15 @@ import { useState } from "react";
 import UpdaterModal from "./UpdaterModal";
 import CustomInstallerModal from "./CustomInstallerModal";
 import { open } from "@tauri-apps/api/shell";
+import { useUpdaterStore } from "./updaterStore";
 
 export default function About() {
   const [updaterOpen, setUpdaterOpen] = useState(false);
   const [installerOpen, setInstallerOpen] = useState(false);
+  const { result: updateResult } = useUpdaterStore();
   const openLink = (url: string) => open(url);
+
+  const currentVersion = updateResult?.current_version || "1.0.1";
 
   return (
     <div className="settings-view">
@@ -20,7 +24,22 @@ export default function About() {
       <section>
         <h3>Updates & Installation</h3>
         <p className="modal-text">
-          Current Version: <strong>v0.1.0</strong>
+          Current Version: <strong>v{currentVersion}</strong>
+          {updateResult?.has_update && (
+            <span
+              style={{
+                marginLeft: 10,
+                padding: "2px 8px",
+                borderRadius: 12,
+                fontSize: 12,
+                backgroundColor: "rgba(80, 250, 123, 0.2)",
+                color: "#50fa7b",
+                border: "1px solid rgba(80, 250, 123, 0.4)",
+              }}
+            >
+              Update Available (v{updateResult.latest_version})
+            </span>
+          )}
         </p>
         <div className="row" style={{ marginTop: 10 }}>
           <button className="primary" onClick={() => setUpdaterOpen(true)}>
