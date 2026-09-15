@@ -2,11 +2,13 @@ import { useEffect, useState, MouseEvent } from "react";
 import { appWindow } from "@tauri-apps/api/window";
 import UpdaterModal from "./UpdaterModal";
 import CustomInstallerModal from "./CustomInstallerModal";
+import { useUpdaterStore } from "./updaterStore";
 
 export default function Titlebar() {
   const [isMaximized, setIsMaximized] = useState(false);
   const [updaterOpen, setUpdaterOpen] = useState(false);
   const [installerOpen, setInstallerOpen] = useState(false);
+  const { checking: updateChecking, result: updateResult } = useUpdaterStore();
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -117,11 +119,33 @@ export default function Titlebar() {
           <button
             type="button"
             className="titlebar-btn"
-            style={{ width: "auto", padding: "0 8px", fontSize: 11, color: "var(--accent)", border: "1px solid rgba(155,107,255,0.3)", borderRadius: 4, marginRight: 6 }}
+            style={{
+              width: "auto",
+              padding: "0 8px",
+              fontSize: 11,
+              color: updateResult?.has_update ? "#ffffff" : "var(--accent)",
+              backgroundColor: updateResult?.has_update ? "rgba(155,107,255,0.3)" : "transparent",
+              border: updateResult?.has_update ? "1px solid rgba(155,107,255,0.8)" : "1px solid rgba(155,107,255,0.3)",
+              borderRadius: 4,
+              marginRight: 6,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              boxShadow: updateResult?.has_update ? "0 0 8px rgba(155,107,255,0.5)" : "none",
+            }}
             onClick={() => setUpdaterOpen(true)}
-            title="Check Updates"
+            title={updateResult?.has_update ? `Update v${updateResult.latest_version} Available` : "Check Updates"}
           >
-            Update
+            {updateResult?.has_update ? (
+              <>
+                <span className="update-dot" style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: "#50fa7b", display: "inline-block" }} />
+                <span>Update Available</span>
+              </>
+            ) : updateChecking ? (
+              "Checking..."
+            ) : (
+              "Update"
+            )}
           </button>
           <button
             type="button"

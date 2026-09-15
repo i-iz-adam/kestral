@@ -6,6 +6,7 @@ import UpdaterModal from "./UpdaterModal";
 import CustomInstallerModal from "./CustomInstallerModal";
 import GithubPanel from "./GithubPanel";
 import WorkspacePanel from "./WorkspacePanel";
+import { useUpdaterStore } from "./updaterStore";
 
 export interface PythonStatusPayload {
   installed: boolean;
@@ -50,6 +51,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
 
   const [updaterOpen, setUpdaterOpen] = useState(false);
   const [installerOpen, setInstallerOpen] = useState(false);
+  const { result: updateResult } = useUpdaterStore();
 
   useEffect(() => {
     invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then((cfg) => {
@@ -340,6 +342,11 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
         <h3>Software Updates</h3>
         <p className="hint small">
           Check for software updates or rerun the custom installation setup.
+          {updateResult?.has_update && (
+            <span style={{ display: "block", marginTop: 6, color: "#50fa7b", fontWeight: 500 }}>
+              Update Available: v{updateResult.current_version} &rarr; v{updateResult.latest_version}
+            </span>
+          )}
         </p>
         <div className="row" style={{ marginTop: 10 }}>
           <button className="primary" onClick={() => setUpdaterOpen(true)}>

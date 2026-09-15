@@ -5,6 +5,7 @@ import AppShell from "./app/AppShell";
 import Titlebar from "./app/Titlebar";
 import type { SetupStepDef } from "./setup/types";
 import { ensureAgentEventsStarted } from "./app/agentStore";
+import { checkAppUpdates } from "./app/updaterStore";
 
 export default function App() {
   const [checking, setChecking] = useState(true);
@@ -17,6 +18,9 @@ export default function App() {
     // SessionView's own mount is a no-op, guarded by agentStore's own
     // `started` flag.
     ensureAgentEventsStarted();
+    // Trigger background check for updates on app launch
+    checkAppUpdates().catch((err) => console.warn("Background update check error:", err));
+
     invoke<SetupStepDef[]>("get_pending_setup_steps")
       .then((steps) => {
         setNeedsSetup(steps.length > 0);
