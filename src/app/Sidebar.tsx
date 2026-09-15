@@ -486,6 +486,7 @@ function SessionItemRow({
   onOpenMenu: (e: React.MouseEvent) => void;
 }) {
   const { sending, unseenActivity } = useAgentSession(session.id);
+  const displayTitle = session.title.length > 20 ? `${session.title.slice(0, 20)}...` : session.title;
 
   if (isRenaming) {
     return (
@@ -528,7 +529,7 @@ function SessionItemRow({
           />
         )}
         {session.pinned && <span className="pinned-badge" title="Pinned">📌</span>}
-        <span className="session-title" title={session.title}>{session.title}</span>
+        <span className="session-title" title={session.title}>{displayTitle}</span>
       </div>
 
       <span className="session-item-right">
