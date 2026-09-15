@@ -63,6 +63,10 @@ pub struct Session {
     /// something (a build tool downloading its dependencies).
     #[serde(default)]
     pub sandbox_network: bool,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
+    pub archived: bool,
 }
 
 impl Session {
@@ -112,6 +116,8 @@ pub fn create(
         turns_since_reflection: 0,
         sandbox_shell: false,
         sandbox_network: false,
+        pinned: false,
+        archived: false,
     };
     save(app_handle, &session);
     session
@@ -162,6 +168,20 @@ pub fn set_title(app_handle: &tauri::AppHandle, id: &str, title: String) -> Resu
 pub fn set_planning_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.planning_enabled = enabled;
+    save(app_handle, &session);
+    Ok(())
+}
+
+pub fn set_pinned(app_handle: &tauri::AppHandle, id: &str, pinned: bool) -> Result<(), String> {
+    let mut session = load(app_handle, id).ok_or("Session not found")?;
+    session.pinned = pinned;
+    save(app_handle, &session);
+    Ok(())
+}
+
+pub fn set_archived(app_handle: &tauri::AppHandle, id: &str, archived: bool) -> Result<(), String> {
+    let mut session = load(app_handle, id).ok_or("Session not found")?;
+    session.archived = archived;
     save(app_handle, &session);
     Ok(())
 }
@@ -232,6 +252,8 @@ mod tests {
             turns_since_reflection: 0,
             sandbox_shell: false,
             sandbox_network: false,
+        pinned: false,
+        archived: false,
         };
         assert_eq!(session.effective_updated_at(), 1000);
 
@@ -277,6 +299,8 @@ mod tests {
                 turns_since_reflection: 0,
                 sandbox_shell: false,
                 sandbox_network: false,
+        pinned: false,
+        archived: false,
             },
             Session {
                 id: "newly-created".into(),
@@ -292,6 +316,8 @@ mod tests {
                 turns_since_reflection: 0,
                 sandbox_shell: false,
                 sandbox_network: false,
+        pinned: false,
+        archived: false,
             },
             Session {
                 id: "legacy-session".into(),
@@ -307,6 +333,8 @@ mod tests {
                 turns_since_reflection: 0,
                 sandbox_shell: false,
                 sandbox_network: false,
+        pinned: false,
+        archived: false,
             },
         ];
 

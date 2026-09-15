@@ -35,6 +35,8 @@ export interface Session {
   messages: ChatMessage[];
   created_at: number;
   updated_at?: number;
+  pinned?: boolean;
+  archived?: boolean;
 }
 
 export interface Workspace {

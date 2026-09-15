@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode, useCallback } from "react";
+import { useEffect, useState, type ReactNode, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import type { Session, Workspace } from "../types";
 import EngineStatusBadge from "./EngineStatusBadge";
@@ -45,23 +45,49 @@ export default function Sidebar({
   const [error, setError] = useState<string | null>(null);
   const [, setTick] = useState(0);
 
+  // Issue #35, #36, #37, #38 state
+  const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [otherWorkspacesOpen, setOtherWorkspacesOpen] = useState(false);
+
+  // Context menu state
+  const [contextMenuSessionId, setContextMenuSessionId] = useState<string | null>(null);
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Renaming state
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenuSessionId(null);
+        setContextMenuPos(null);
+      }
+    };
+    window.addEventListener("mousedown", handleClickOutside);
+    return () => window.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   // Refresh workspaces list
   const refreshWorkspaces = useCallback(() => {
     invoke<Workspace[]>("list_workspaces")
       .then((list) => {
         setWorkspaces(list);
-        if (!getActiveWorkspace() && list.length > 0) {
-          // If no active workspace is set, set default to first workspace
-        }
       })
       .catch(() => {});
   }, []);
 
+  const fetchSessions = useCallback(() => {
+    invoke<Session[]>("list_sessions").then(setSessions);
+  }, []);
+
   // Initial load
   useEffect(() => {
-    const fetchSessions = () => {
-      invoke<Session[]>("list_sessions").then(setSessions);
-    };
     fetchSessions();
     refreshWorkspaces();
 
@@ -79,37 +105,58 @@ export default function Sidebar({
       unsubSessions();
       unsubWorkspace();
     };
-  }, [refreshKey, refreshWorkspaces]);
+  }, [refreshKey, refreshWorkspaces, fetchSessions]);
 
   // Get workspace name from path
   const getWorkspaceName = useCallback(
     (path: string | null): string => {
-      if (!path) return "Unknown";
+      if (!path) return "Unknown Workspace";
       const ws = workspaces.find((w) => w.path === path);
       return ws?.name ?? path.split("/").pop() ?? path;
     },
     [workspaces]
   );
 
-  // Filter sessions: show chats for active workspace + any chats from other workspaces with running agents/unread completions
-  const filteredSessions = sessions.filter((s) => {
+  // Filter archived / unarchived
+  const activeOrArchivedSessions = sessions.filter((s) => {
+    if (showArchived) return s.archived;
+    return !s.archived;
+  });
+
+  // Split sessions into current workspace vs other workspaces
+  const currentWorkspaceSessions = activeOrArchivedSessions.filter((s) => {
     if (!activeWorkspacePath) return true;
     if (s.workspace === activeWorkspacePath) return true;
     const rec = getRecord(s.id);
     return rec.sending || rec.unseenActivity;
   });
 
-  // Sort sessions: active runs float to the top; completed sessions follow ordered by updated_at (or created_at) descending.
-  const sortedSessions = [...filteredSessions].sort((a, b) => {
-    const aActive = getRecord(a.id).sending;
-    const bActive = getRecord(b.id).sending;
-    if (aActive !== bActive) {
-      return aActive ? -1 : 1;
-    }
-    const aTime = a.updated_at ?? a.created_at;
-    const bTime = b.updated_at ?? b.created_at;
-    return bTime - aTime;
+  const otherWorkspaceSessions = activeOrArchivedSessions.filter((s) => {
+    if (!activeWorkspacePath) return false;
+    if (s.workspace === activeWorkspacePath) return false;
+    const rec = getRecord(s.id);
+    return !(rec.sending || rec.unseenActivity);
   });
+
+  // Sort sessions: Pinned first (#36), active running next, then updated_at descending
+  const sortSessions = (list: Session[]) => {
+    return [...list].sort((a, b) => {
+      const aPinned = a.pinned ? 1 : 0;
+      const bPinned = b.pinned ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+
+      const aActive = getRecord(a.id).sending ? 1 : 0;
+      const bActive = getRecord(b.id).sending ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+
+      const aTime = a.updated_at ?? a.created_at;
+      const bTime = b.updated_at ?? b.created_at;
+      return bTime - aTime;
+    });
+  };
+
+  const sortedCurrentSessions = sortSessions(currentWorkspaceSessions);
+  const sortedOtherSessions = sortSessions(otherWorkspaceSessions);
 
   const createSession = async () => {
     setError(null);
@@ -121,12 +168,94 @@ export default function Sidebar({
         mode,
         workspace: getActiveWorkspace(),
       });
+      fetchSessions();
       onSessionCreated(session.id);
     } catch (e) {
       setError(String(e));
     } finally {
       setCreating(false);
     }
+  };
+
+  // Session actions (#35)
+  const handlePin = async (id: string, pinned: boolean) => {
+    await invoke("set_session_pinned", { id, pinned }).catch(() => {});
+    fetchSessions();
+    setContextMenuSessionId(null);
+  };
+
+  const handleArchive = async (id: string, archived: boolean) => {
+    await invoke("set_session_archived", { id, archived }).catch(() => {});
+    fetchSessions();
+    setContextMenuSessionId(null);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this session?")) return;
+    await invoke("delete_session", { id }).catch(() => {});
+    fetchSessions();
+    setContextMenuSessionId(null);
+  };
+
+  const handleStartRename = (session: Session) => {
+    setRenamingSessionId(session.id);
+    setRenameInput(session.title);
+    setContextMenuSessionId(null);
+  };
+
+  const handleSaveRename = async (id: string) => {
+    if (!renameInput.trim()) return;
+    await invoke("set_session_title", { id, title: renameInput.trim() }).catch(() => {});
+    setRenamingSessionId(null);
+    fetchSessions();
+  };
+
+  // Bulk actions (#38)
+  const toggleSelectSession = (id: string) => {
+    setSelectedSessionIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selectedSessionIds.length} selected session(s)?`)) return;
+    for (const id of selectedSessionIds) {
+      await invoke("delete_session", { id }).catch(() => {});
+    }
+    setSelectedSessionIds([]);
+    setIsBulkMode(false);
+    fetchSessions();
+  };
+
+  const handleBulkExportMarkdown = () => {
+    const selected = sessions.filter((s) => selectedSessionIds.includes(s.id));
+    let md = `# Kestrel Sessions Export\nExported on ${new Date().toLocaleString()}\n\n---`;
+    for (const s of selected) {
+      md += `\n\n## Session: ${s.title}\n- **ID**: ${s.id}\n- **Mode**: ${s.mode}\n- **Workspace**: ${s.workspace}\n- **Created**: ${new Date(s.created_at).toLocaleString()}\n\n### Messages:\n`;
+      for (const m of s.messages) {
+        md += `\n**${m.role.toUpperCase()}**:\n${m.content ?? (m.tool_calls ? JSON.stringify(m.tool_calls) : "")}\n`;
+      }
+      md += `\n---`;
+    }
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kestrel-sessions-export-${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBulkExportJson = () => {
+    const selected = sessions.filter((s) => selectedSessionIds.includes(s.id));
+    const jsonStr = JSON.stringify(selected, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kestrel-sessions-export-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -146,26 +275,177 @@ export default function Sidebar({
         </button>
       </div>
 
-      <button className="primary" onClick={createSession} disabled={creating} style={{ marginTop: 8 }}>
-        {creating ? "Creating..." : "New session"}
-      </button>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button className="primary" onClick={createSession} disabled={creating} style={{ flex: 1, marginTop: 8 }}>
+          {creating ? "Creating..." : "New session"}
+        </button>
+        <button
+          className={isBulkMode ? "active" : ""}
+          onClick={() => {
+            setIsBulkMode(!isBulkMode);
+            setSelectedSessionIds([]);
+          }}
+          title="Select multiple sessions for bulk actions"
+          style={{ marginTop: 8, padding: "0 10px", background: isBulkMode ? "var(--surface-2)" : "transparent", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-dim)", cursor: "pointer" }}
+        >
+          ☑️
+        </button>
+      </div>
       {error && <p className="fail small">{error}</p>}
 
+      {/* Bulk action bar (#38) */}
+      {isBulkMode && (
+        <div className="bulk-action-bar">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 600 }}>{selectedSessionIds.length} selected</span>
+            <button
+              onClick={() => {
+                if (selectedSessionIds.length === sessions.length) {
+                  setSelectedSessionIds([]);
+                } else {
+                  setSelectedSessionIds(sessions.map((s) => s.id));
+                }
+              }}
+              style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: "11px" }}
+            >
+              {selectedSessionIds.length === sessions.length ? "Deselect All" : "Select All"}
+            </button>
+          </div>
+          <div className="bulk-action-buttons">
+            <button onClick={handleBulkExportMarkdown} disabled={selectedSessionIds.length === 0}>
+              Export MD
+            </button>
+            <button onClick={handleBulkExportJson} disabled={selectedSessionIds.length === 0}>
+              Export JSON
+            </button>
+            <button className="danger" onClick={handleBulkDelete} disabled={selectedSessionIds.length === 0}>
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="session-list" style={{ marginTop: 12 }}>
-        {sortedSessions.map((s) => (
-          <SessionListItem
+        {/* Toggle between Active and Archived sessions */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, padding: "0 4px" }}>
+          <span className="small" style={{ color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {showArchived ? "Archived Sessions" : "Sessions"}
+          </span>
+          <button
+            onClick={() => setShowArchived(!showArchived)}
+            style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: "11px" }}
+          >
+            {showArchived ? "Active" : `Archive (${sessions.filter((s) => s.archived).length})`}
+          </button>
+        </div>
+
+        {/* Current Workspace Sessions */}
+        {sortedCurrentSessions.map((s) => (
+          <SessionItemRow
             key={s.id}
             session={s}
             active={s.id === activeSessionId}
             onSelect={() => onSelectSession(s.id)}
             showWorkspace={activeWorkspacePath !== null && s.workspace !== activeWorkspacePath}
             getWorkspaceName={getWorkspaceName}
+            isBulkMode={isBulkMode}
+            isSelected={selectedSessionIds.includes(s.id)}
+            onToggleSelect={() => toggleSelectSession(s.id)}
+            isRenaming={renamingSessionId === s.id}
+            renameInput={renameInput}
+            onRenameChange={setRenameInput}
+            onSaveRename={() => handleSaveRename(s.id)}
+            onCancelRename={() => setRenamingSessionId(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenuSessionId(s.id);
+              setContextMenuPos({ x: e.clientX, y: e.clientY });
+            }}
+            onOpenMenu={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setContextMenuSessionId(s.id);
+              setContextMenuPos({ x: rect.left, y: rect.bottom + 4 });
+            }}
           />
         ))}
-        {sortedSessions.length === 0 && (
+
+        {sortedCurrentSessions.length === 0 && !showArchived && (
           <p className="hint small">No sessions yet for this workspace.</p>
         )}
+
+        {/* Other Workspaces Section (#37) */}
+        {!showArchived && sortedOtherSessions.length > 0 && (
+          <>
+            <div
+              className="workspace-section-header"
+              onClick={() => setOtherWorkspacesOpen(!otherWorkspacesOpen)}
+            >
+              <span>Other workspaces ({sortedOtherSessions.length})</span>
+              <span>{otherWorkspacesOpen ? "▼" : "▶"}</span>
+            </div>
+            {otherWorkspacesOpen &&
+              sortedOtherSessions.map((s) => (
+                <SessionItemRow
+                  key={s.id}
+                  session={s}
+                  active={s.id === activeSessionId}
+                  onSelect={() => onSelectSession(s.id)}
+                  showWorkspace={true}
+                  getWorkspaceName={getWorkspaceName}
+                  isBulkMode={isBulkMode}
+                  isSelected={selectedSessionIds.includes(s.id)}
+                  onToggleSelect={() => toggleSelectSession(s.id)}
+                  isRenaming={renamingSessionId === s.id}
+                  renameInput={renameInput}
+                  onRenameChange={setRenameInput}
+                  onSaveRename={() => handleSaveRename(s.id)}
+                  onCancelRename={() => setRenamingSessionId(null)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenuSessionId(s.id);
+                    setContextMenuPos({ x: e.clientX, y: e.clientY });
+                  }}
+                  onOpenMenu={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setContextMenuSessionId(s.id);
+                    setContextMenuPos({ x: rect.left, y: rect.bottom + 4 });
+                  }}
+                />
+              ))}
+          </>
+        )}
       </div>
+
+      {/* Context Menu Popup (#35) */}
+      {contextMenuSessionId && contextMenuPos && (
+        <div
+          ref={menuRef}
+          className="session-context-menu"
+          style={{ top: contextMenuPos.y, left: contextMenuPos.x }}
+        >
+          {(() => {
+            const targetSession = sessions.find((s) => s.id === contextMenuSessionId);
+            if (!targetSession) return null;
+            return (
+              <>
+                <button onClick={() => handlePin(targetSession.id, !targetSession.pinned)}>
+                  {targetSession.pinned ? "📌 Unpin" : "📌 Pin to top"}
+                </button>
+                <button onClick={() => handleStartRename(targetSession)}>✏️ Rename</button>
+                <button onClick={() => handleArchive(targetSession.id, !targetSession.archived)}>
+                  {targetSession.archived ? "📂 Unarchive" : "📦 Archive"}
+                </button>
+                <button
+                  onClick={() => handleDelete(targetSession.id)}
+                  style={{ color: "var(--danger)" }}
+                >
+                  🗑️ Delete
+                </button>
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       <EngineStatusBadge />
 
@@ -186,6 +466,111 @@ export default function Sidebar({
           <InfoIcon />
         </IconRailButton>
       </div>
+    </div>
+  );
+}
+
+function SessionItemRow({
+  session,
+  active,
+  onSelect,
+  showWorkspace,
+  getWorkspaceName,
+  isBulkMode,
+  isSelected,
+  onToggleSelect,
+  isRenaming,
+  renameInput,
+  onRenameChange,
+  onSaveRename,
+  onCancelRename,
+  onContextMenu,
+  onOpenMenu,
+}: {
+  session: Session;
+  active: boolean;
+  onSelect: () => void;
+  showWorkspace?: boolean;
+  getWorkspaceName?: (path: string | null) => string;
+  isBulkMode: boolean;
+  isSelected: boolean;
+  onToggleSelect: () => void;
+  isRenaming: boolean;
+  renameInput: string;
+  onRenameChange: (val: string) => void;
+  onSaveRename: () => void;
+  onCancelRename: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  onOpenMenu: (e: React.MouseEvent) => void;
+}) {
+  const { sending, unseenActivity } = useAgentSession(session.id);
+
+  if (isRenaming) {
+    return (
+      <div style={{ display: "flex", gap: 4, padding: "6px", background: "var(--surface-2)", borderRadius: 8 }}>
+        <input
+          type="text"
+          value={renameInput}
+          onChange={(e) => onRenameChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSaveRename();
+            if (e.key === "Escape") onCancelRename();
+          }}
+          autoFocus
+          style={{ flex: 1, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", padding: "4px 6px", fontSize: "13px" }}
+        />
+        <button onClick={onSaveRename} style={{ background: "var(--accent)", border: "none", color: "#fff", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: "11px" }}>Save</button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={
+        "session-item" +
+        (session.mode === "general" ? " mode-general" : "") +
+        (active ? " active" : "") +
+        (unseenActivity ? " has-activity" : "")
+      }
+      onClick={onSelect}
+      onContextMenu={onContextMenu}
+    >
+      <div className="session-item-row">
+        {isBulkMode && (
+          <input
+            type="checkbox"
+            className="session-checkbox"
+            checked={isSelected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+          />
+        )}
+        {session.pinned && <span className="pinned-badge" title="Pinned">📌</span>}
+        <span className="session-title" title={session.title}>{session.title}</span>
+      </div>
+
+      <span className="session-item-right">
+        {sending && <span className="session-working-dot" title="Working..." />}
+        {!sending && unseenActivity && (
+          <span className="session-ready-dot" title="Finished while you were away" />
+        )}
+        <span className="session-mode">{session.mode}</span>
+        <button
+          className="session-action-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenMenu(e);
+          }}
+          title="Session options"
+        >
+          ⋮
+        </button>
+      </span>
+      {showWorkspace && session.workspace && getWorkspaceName && (
+        <span className="session-workspace external" title={session.workspace}>
+          {getWorkspaceName(session.workspace)}
+        </span>
+      )}
     </div>
   );
 }
@@ -261,46 +646,5 @@ function InfoIcon() {
       <circle cx="12" cy="12" r="9" />
       <path d="M12 11v6M12 7.5h.01" />
     </svg>
-  );
-}
-
-function SessionListItem({
-  session,
-  active,
-  onSelect,
-  showWorkspace,
-  getWorkspaceName,
-}: {
-  session: Session;
-  active: boolean;
-  onSelect: () => void;
-  showWorkspace?: boolean;
-  getWorkspaceName?: (path: string | null) => string;
-}) {
-  const { sending, unseenActivity } = useAgentSession(session.id);
-  return (
-    <button
-      className={
-        "session-item" +
-        (session.mode === "general" ? " mode-general" : "") +
-        (active ? " active" : "") +
-        (unseenActivity ? " has-activity" : "")
-      }
-      onClick={onSelect}
-    >
-      <span className="session-title">{session.title}</span>
-      <span className="session-item-right">
-        {sending && <span className="session-working-dot" title="Working..." />}
-        {!sending && unseenActivity && (
-          <span className="session-ready-dot" title="Finished while you were away" />
-        )}
-        <span className="session-mode">{session.mode}</span>
-      </span>
-      {showWorkspace && session.workspace && getWorkspaceName && (
-        <span className="session-workspace external" title={session.workspace}>
-          {getWorkspaceName(session.workspace)}
-        </span>
-      )}
-    </button>
   );
 }

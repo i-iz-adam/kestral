@@ -5338,3 +5338,127 @@ button.github-card:hover {
   gap: 8px;
   justify-content: center;
 }
+
+/* Session Pin / Archive / Context Menu & Bulk actions */
+.session-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.session-checkbox {
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.pinned-badge {
+  color: var(--gold);
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+.session-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.session-action-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.session-context-menu {
+  position: fixed;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px 0;
+}
+
+.session-context-menu button {
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.session-context-menu button:hover {
+  background: var(--surface-2);
+  color: var(--accent-soft);
+}
+
+.workspace-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.workspace-section-header:hover {
+  color: var(--text);
+  border-color: var(--border-soft);
+}
+
+.bulk-action-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.bulk-action-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.bulk-action-buttons button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.bulk-action-buttons button:hover {
+  border-color: var(--accent);
+  color: var(--accent-soft);
+}
+
+.bulk-action-buttons button.danger {
+  color: var(--danger);
+  border-color: rgba(242, 102, 90, 0.3);
+}
+
+.bulk-action-buttons button.danger:hover {
+  background: rgba(242, 102, 90, 0.15);
+}
