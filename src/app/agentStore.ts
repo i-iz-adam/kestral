@@ -153,7 +153,9 @@ export function setActiveSession(sessionId: string | null) {
  * the live buffer alongside it survives independently of that mount. */
 export async function loadSession(sessionId: string): Promise<void> {
   const session = await invoke<Session>("get_session", { id: sessionId });
-  patch(sessionId, { session });
+  if (session) {
+    patch(sessionId, { session });
+  }
 }
 
 /** Optimistic local edits (repo link, planning/sub-agent toggles) so the
@@ -326,22 +328,30 @@ export function ensureAgentEventsStarted() {
     // the same patch — so a subscribed view swaps from "live" to
     // "history" atomically and never flashes an empty gap in between.
     let session: Session | null = null;
-    try {
-      session = await invoke<Session>("get_session", { id: session_id });
-    } catch {
-      // Session may have been deleted while the turn was running — keep
-      // whatever record we already had rather than wiping it to null.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        session = await invoke<Session>("get_session", { id: session_id });
+        if (session) break;
+      } catch {
+        // Session may have been deleted while the turn was running — keep
+        // whatever record we already had rather than wiping it to null.
+      }
+      await new Promise((r) => setTimeout(r, 50));
     }
     const rec = getRecord(session_id);
-    const timeline: TimelineItem[] = error
-      ? [{ kind: "message", key: nextKey("err"), role: "system", content: `Error: ${error}`, streaming: false }]
-      : !error && reason === "stopped"
-      ? [{ kind: "message", key: nextKey("stop"), role: "system", content: "Turn stopped — progress up to this point is saved. Send a follow-up to continue.", streaming: false }]
-      : [];
+    const targetSession = session ?? rec.session;
+    const timeline: TimelineItem[] = session
+      ? (error
+          ? [{ kind: "message", key: nextKey("err"), role: "system", content: `Error: ${error}`, streaming: false }]
+          : !error && reason === "stopped"
+          ? [{ kind: "message", key: nextKey("stop"), role: "system", content: "Turn stopped — progress up to this point is saved. Send a follow-up to continue.", streaming: false }]
+          : [])
+      : rec.timeline;
+
     patch(session_id, {
-      session: session ?? rec.session,
+      session: targetSession,
       timeline,
-      liveCalls: [],
+      liveCalls: session ? [] : rec.liveCalls,
       subagentCalls: rec.subagentCalls ?? {},
       sending: false,
       unseenActivity: session_id !== activeSessionId,

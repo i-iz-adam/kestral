@@ -154,9 +154,15 @@ pub fn set_planning_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bo
 }
 
 pub fn save(app_handle: &tauri::AppHandle, session: &Session) {
-    let path = sessions_dir(app_handle).join(format!("{}.json", session.id));
+    let dir = sessions_dir(app_handle);
+    let path = dir.join(format!("{}.json", session.id));
+    let temp_path = dir.join(format!("{}.json.tmp.{}", session.id, Uuid::new_v4()));
     if let Ok(data) = serde_json::to_string_pretty(session) {
-        let _ = fs::write(path, data);
+        if fs::write(&temp_path, &data).is_ok() {
+            if fs::rename(&temp_path, &path).is_err() {
+                let _ = fs::remove_file(&temp_path);
+            }
+        }
     }
 }
 

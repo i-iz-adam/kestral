@@ -54,10 +54,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     setActiveSubagentId(null);
   }, [sessionId]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [timeline]);
-
   // Command menu's filtered list is recomputed from `input` on every
   // render (cheap — a handful of string comparisons over ~4 commands);
   // the highlighted row resets to the top whenever the match set changes
@@ -87,6 +83,24 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     () => (session ? buildHistoryTimeline(session.messages) : []),
     [session?.messages]
   );
+
+  // Scroll instantly to bottom on session switch or when history loads
+  useEffect(() => {
+    if (session) {
+      bottomRef.current?.scrollIntoView({ behavior: "auto" });
+      const timer = setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: "auto" });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [sessionId, session?.id, historyItems.length]);
+
+  // Smooth scroll during live streaming updates
+  useEffect(() => {
+    if (timeline.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [timeline]);
 
   // Local-only feedback for a slash command — never touches session.messages
   // or the model, so it doesn't cost a turn and disappears like any other
