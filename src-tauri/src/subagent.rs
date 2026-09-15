@@ -54,6 +54,7 @@ pub(crate) async fn run(
 ) -> Result<String, String> {
     let cfg = config::load_omniroute_config(app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
+    let model = agent::effective_model(&cfg);
 
     let mut messages = vec![
         ChatMessage {
@@ -141,7 +142,7 @@ pub(crate) async fn run(
                     content: Some(overview_prompt.to_string()),
                     ..Default::default()
                 });
-                let resp = omniroute::chat_completion(&cfg, agent::MODEL, &messages, None).await;
+                let resp = omniroute::chat_completion(&cfg, model, &messages, None).await;
                 if let Ok(resp) = resp {
                     if let Some(text) = resp.content {
                         let trimmed = text.trim();
@@ -161,11 +162,11 @@ pub(crate) async fn run(
         // does, just against this sub-agent's own local `messages`.
         context::maybe_compact(&cfg, &mut messages, false).await;
 
-        let assistant_msg = match omniroute::chat_completion(&cfg, agent::MODEL, &messages, Some(&tools_value)).await {
+        let assistant_msg = match omniroute::chat_completion(&cfg, model, &messages, Some(&tools_value)).await {
             Ok(m) => m,
             Err(e) if context::is_context_length_error(&e) => {
                 if context::maybe_compact(&cfg, &mut messages, true).await {
-                    omniroute::chat_completion(&cfg, agent::MODEL, &messages, Some(&tools_value)).await?
+                    omniroute::chat_completion(&cfg, model, &messages, Some(&tools_value)).await?
                 } else {
                     return Err(e);
                 }

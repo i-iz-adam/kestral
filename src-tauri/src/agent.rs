@@ -382,6 +382,19 @@ pub(crate) async fn maybe_auto_generate_title(
 
 pub(crate) const MODEL: &str = "auto/coding";
 
+/// The model id a turn should actually be sent to: whatever the person
+/// picked as their default in Settings, or `MODEL` when they haven't
+/// chosen one (fresh install, or explicitly reset). Centralized here so
+/// every call site — the main turn loop and sub-agents alike — agrees on
+/// the same fallback instead of each hardcoding `MODEL` directly.
+pub(crate) fn effective_model(cfg: &config::OmniRouteConfig) -> &str {
+    cfg.default_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(MODEL)
+}
+
 pub(crate) fn is_mutating(name: &str) -> bool {
     tools::is_mutating(name) || github::is_mutating(name) || skills::is_mutating(name)
 }
@@ -651,6 +664,7 @@ pub async fn run_turn_with_stop(
 async fn stream_assistant_turn(
     app_handle: &tauri::AppHandle,
     cfg: &config::OmniRouteConfig,
+    model: &str,
     session_id: &str,
     request_messages: &[ChatMessage],
     tools_schema: Option<&Value>,
@@ -666,7 +680,7 @@ async fn stream_assistant_turn(
     let delta_request_id = request_id.clone();
     let result = omniroute::chat_completion_stream(
         cfg,
-        MODEL,
+        model,
         request_messages,
         tools_schema,
         move |delta: &str| {
@@ -904,8 +918,9 @@ async fn run_turn_inner(
         };
         let request_messages = build_messages(&session);
 
+        let model = effective_model(&cfg);
         let (mut request_id, mut stream_result) =
-            stream_assistant_turn(app_handle, &cfg, session_id, &request_messages, tools_schema.as_ref()).await;
+            stream_assistant_turn(app_handle, &cfg, model, session_id, &request_messages, tools_schema.as_ref()).await;
 
         if let Err(e) = &stream_result {
             if context::is_context_length_error(e) {
@@ -919,7 +934,7 @@ async fn run_turn_inner(
                     sessions::save(app_handle, &session);
                     let retry_messages = build_messages(&session);
                     let (rid2, res2) =
-                        stream_assistant_turn(app_handle, &cfg, session_id, &retry_messages, tools_schema.as_ref()).await;
+                        stream_assistant_turn(app_handle, &cfg, model, session_id, &retry_messages, tools_schema.as_ref()).await;
                     request_id = rid2;
                     stream_result = res2;
                 }

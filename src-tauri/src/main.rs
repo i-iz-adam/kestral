@@ -105,6 +105,76 @@ async fn fetch_omniroute_endpoint(
 }
 
 #[tauri::command]
+fn set_default_model(
+    app_handle: tauri::AppHandle,
+    model: Option<String>,
+) -> Result<config::OmniRouteConfig, String> {
+    config::set_default_model(&app_handle, model)
+}
+
+#[tauri::command]
+fn get_cached_models(app_handle: tauri::AppHandle) -> Option<config::ModelsCache> {
+    config::load_models_cache(&app_handle)
+}
+
+/// Always hits the network (unlike `get_cached_models`, which only reads
+/// whatever's on disk) and refreshes the cache on success. Run from the
+/// frontend as a plain async `invoke` — same as every other Tauri
+/// command — so it never blocks the UI thread; the picker calls this
+/// once in the background on open and again whenever the person presses
+/// Refresh.
+#[tauri::command]
+async fn fetch_omniroute_models(app_handle: tauri::AppHandle) -> Result<config::ModelsCache, String> {
+    let cfg = config::load_omniroute_config(&app_handle)
+        .ok_or("No OmniRoute config saved yet — finish setup first")?;
+    let models = omniroute::list_models(&cfg).await?;
+    config::save_models_cache(&app_handle, &models).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct ModelTestResult {
+    ok: bool,
+    latency_ms: u64,
+    message: String,
+}
+
+/// A real round-trip through the selected model — not just "is OmniRoute
+/// reachable" (that's `test_omniroute_connection`) but "does this exact
+/// model id actually complete a request" — since an alias or typo'd id
+/// can pass connection tests yet fail every real turn.
+#[tauri::command]
+async fn test_model(app_handle: tauri::AppHandle, model: String) -> Result<ModelTestResult, String> {
+    let cfg = config::load_omniroute_config(&app_handle)
+        .ok_or("No OmniRoute config saved yet — finish setup first")?;
+    let messages = vec![omniroute::ChatMessage {
+        role: "user".into(),
+        content: Some("Reply with just the word: OK".into()),
+        ..Default::default()
+    }];
+    let started = std::time::Instant::now();
+    match omniroute::chat_completion(&cfg, &model, &messages, None).await {
+        Ok(resp) => {
+            let latency_ms = started.elapsed().as_millis() as u64;
+            let has_content = resp.content.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            Ok(ModelTestResult {
+                ok: has_content,
+                latency_ms,
+                message: if has_content {
+                    format!("Responded in {}ms", latency_ms)
+                } else {
+                    "Model returned an empty response".to_string()
+                },
+            })
+        }
+        Err(e) => Ok(ModelTestResult {
+            ok: false,
+            latency_ms: started.elapsed().as_millis() as u64,
+            message: e,
+        }),
+    }
+}
+
+#[tauri::command]
 async fn test_omniroute_connection(config: config::OmniRouteConfig) -> Result<bool, String> {
     let base = match config.mode.as_str() {
         "local" => "http://127.0.0.1:20128".to_string(),
@@ -548,6 +618,10 @@ fn main() {
             remove_workspace,
             fetch_omniroute_endpoint,
             test_omniroute_connection,
+            set_default_model,
+            get_cached_models,
+            fetch_omniroute_models,
+            test_model,
             create_session,
             list_sessions,
             get_session,

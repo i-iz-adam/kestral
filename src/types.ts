@@ -108,6 +108,24 @@ export interface OmniRouteConfigPayload {
   mode: "local" | "remote";
   remote_url: string | null;
   api_key: string | null;
+  default_model?: string | null;
+}
+
+export interface ModelInfo {
+  id: string;
+  owned_by?: string | null;
+  context_length?: number | null;
+}
+
+export interface ModelsCache {
+  models: ModelInfo[];
+  fetched_at: number;
+}
+
+export interface ModelTestResult {
+  ok: boolean;
+  latency_ms: number;
+  message: string;
 }
 
 export interface Skill {

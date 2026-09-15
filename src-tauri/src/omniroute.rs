@@ -297,6 +297,66 @@ pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
         || lower.contains("pixtral")
 }
 
+/// Fetches the model catalog for the picker in Settings. Tries the
+/// alias-expanded listing first (so OmniRoute's curated `auto/*` routes
+/// show up alongside concrete provider models, same as the Providers
+/// dashboard does), and falls back to the plain listing for older
+/// OmniRoute builds that don't recognize the `prefix` query param.
+pub async fn list_models(cfg: &OmniRouteConfig) -> Result<Vec<crate::config::ModelInfo>, String> {
+    let with_aliases = fetch_endpoint(cfg, "/v1/models?prefix=alias", None, None).await;
+    let raw = match with_aliases {
+        Ok(v) => v,
+        Err(_) => fetch_endpoint(cfg, "/v1/models", None, None).await?,
+    };
+
+    let list = raw
+        .get("data")
+        .or_else(|| raw.get("models"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .or_else(|| raw.as_array().cloned())
+        .ok_or_else(|| "OmniRoute /v1/models returned an unexpected shape".to_string())?;
+
+    let mut models: Vec<crate::config::ModelInfo> = list
+        .iter()
+        .filter_map(|m| {
+            if let Some(id) = m.as_str() {
+                return Some(crate::config::ModelInfo {
+                    id: id.to_string(),
+                    owned_by: None,
+                    context_length: None,
+                });
+            }
+            let obj = m.as_object()?;
+            let id = obj
+                .get("id")
+                .or_else(|| obj.get("name"))
+                .and_then(|v| v.as_str())?
+                .to_string();
+            let owned_by = obj
+                .get("owned_by")
+                .or_else(|| obj.get("provider"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| id.split('/').next().map(|s| s.to_string()).filter(|_| id.contains('/')));
+            let context_length = obj
+                .get("context_length")
+                .or_else(|| obj.get("context_window"))
+                .and_then(|v| v.as_u64());
+            Some(crate::config::ModelInfo { id, owned_by, context_length })
+        })
+        .collect();
+
+    models.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
+    models.dedup_by(|a, b| a.id == b.id);
+
+    if models.is_empty() {
+        return Err("OmniRoute returned no models".to_string());
+    }
+
+    Ok(models)
+}
+
 fn finish_tool_acc(tool_acc: ToolAcc) -> Option<Vec<ToolCall>> {
     if !tool_acc.iter().any(|(_, _, n, _)| !n.is_empty()) {
         return None;

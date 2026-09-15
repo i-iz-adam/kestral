@@ -61,6 +61,13 @@ pub struct OmniRouteConfig {
     pub mode: String,
     pub remote_url: Option<String>,
     pub api_key: Option<String>,
+    /// The model id (or OmniRoute `auto/*` alias) new turns are sent to.
+    /// `None`/empty means "use the built-in default" (see `agent::MODEL`) —
+    /// kept optional rather than always-populated so older configs on disk
+    /// (saved before this field existed) still deserialize fine and fall
+    /// back cleanly instead of erroring.
+    #[serde(default)]
+    pub default_model: Option<String>,
 }
 
 fn app_config_dir(app_handle: &tauri::AppHandle) -> PathBuf {
@@ -86,6 +93,72 @@ pub fn load_omniroute_config(app_handle: &tauri::AppHandle) -> Option<OmniRouteC
     fs::read_to_string(path)
         .ok()
         .and_then(|d| serde_json::from_str(&d).ok())
+}
+
+/// Updates just `default_model` on whatever OmniRoute config is already
+/// saved, so picking a model in Settings never has to round-trip (and
+/// risk clobbering) the connection mode/URL/key fields the model picker
+/// doesn't know about. `None` clears it back to "use the built-in
+/// default". Errors if no connection has been configured yet — there's
+/// nothing sensible to attach a default model to.
+pub fn set_default_model(
+    app_handle: &tauri::AppHandle,
+    model: Option<String>,
+) -> Result<OmniRouteConfig, String> {
+    let mut cfg = load_omniroute_config(app_handle)
+        .ok_or("No OmniRoute config saved yet — finish setup first")?;
+    cfg.default_model = model.filter(|m| !m.trim().is_empty());
+    save_omniroute_config(app_handle, &cfg).map_err(|e| e.to_string())?;
+    Ok(cfg)
+}
+
+/// One entry from OmniRoute's `/v1/models` listing, trimmed to what the
+/// model picker actually renders — everything else in that payload
+/// (pricing tiers, raw capability maps, etc.) is dead weight for this UI.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(default)]
+    pub owned_by: Option<String>,
+    #[serde(default)]
+    pub context_length: Option<u64>,
+}
+
+/// The on-disk model list cache plus when it was fetched (unix millis),
+/// so the picker can paint instantly from a previous run — including the
+/// very first render of a fresh app launch, before any network call has
+/// had a chance to complete — and only fall back to a loading skeleton
+/// when there's truly nothing cached yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelsCache {
+    pub models: Vec<ModelInfo>,
+    pub fetched_at: u64,
+}
+
+fn models_cache_path(app_handle: &tauri::AppHandle) -> PathBuf {
+    app_config_dir(app_handle).join("models_cache.json")
+}
+
+pub fn load_models_cache(app_handle: &tauri::AppHandle) -> Option<ModelsCache> {
+    fs::read_to_string(models_cache_path(app_handle))
+        .ok()
+        .and_then(|d| serde_json::from_str(&d).ok())
+}
+
+pub fn save_models_cache(
+    app_handle: &tauri::AppHandle,
+    models: &[ModelInfo],
+) -> std::io::Result<ModelsCache> {
+    let fetched_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let cache = ModelsCache {
+        models: models.to_vec(),
+        fetched_at,
+    };
+    fs::write(models_cache_path(app_handle), serde_json::to_string_pretty(&cache)?)?;
+    Ok(cache)
 }
 
 pub fn save_workspace_path(app_handle: &tauri::AppHandle, path: &str) -> std::io::Result<()> {

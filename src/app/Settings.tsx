@@ -1,10 +1,30 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { open as openShell } from "@tauri-apps/api/shell";
-import type { OmniRouteConfigPayload, SessionDefaults } from "../types";
+import type { OmniRouteConfigPayload, SessionDefaults, ModelInfo, ModelsCache, ModelTestResult } from "../types";
 import GithubPanel from "./GithubPanel";
 import WorkspacePanel from "./WorkspacePanel";
 import UpdatesSection from "./UpdatesSection";
+
+/// Mirrors `agent::MODEL` in the Rust backend — the model a turn falls
+/// back to when no default has been chosen (or it's been reset). Kept in
+/// sync by hand since the two sides don't share a build step; if that
+/// constant ever changes, update this alongside it.
+const BUILTIN_DEFAULT_MODEL = "auto/coding";
+
+/// How long a cached model list is treated as "fresh enough" that the
+/// picker doesn't feel a need to silently re-fetch on every Settings
+/// visit. The manual Refresh button always bypasses this.
+const MODELS_STALE_MS = 5 * 60 * 1000;
+
+function formatRelativeTime(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 10_000) return "just now";
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
 
 export interface PythonStatusPayload {
   installed: boolean;
@@ -47,12 +67,28 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   const [pythonStatus, setPythonStatus] = useState<PythonStatusPayload | null>(null);
   const [checkingPython, setCheckingPython] = useState(false);
 
+  // ---- Default model picker ----
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [modelsFetchedAt, setModelsFetchedAt] = useState<number | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(true); // no cache yet — first paint
+  const [modelsSyncing, setModelsSyncing] = useState(false); // quiet background refresh
+  const [modelsRefreshing, setModelsRefreshing] = useState(false); // explicit Refresh click
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [modelSearch, setModelSearch] = useState("");
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
+  const [selectingModel, setSelectingModel] = useState<string | null>(null);
+  const [justSavedModel, setJustSavedModel] = useState<string | null>(null);
+  const [testStatus, setTestStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
+  const [testMessage, setTestMessage] = useState<string | null>(null);
+  const hasLoadedModelsOnce = useRef(false);
+
   useEffect(() => {
     invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then((cfg) => {
       if (cfg) {
         setMode(cfg.mode);
         setRemoteUrl(cfg.remote_url ?? "");
         setApiKey(cfg.api_key ?? "");
+        setDefaultModel(cfg.default_model ?? null);
       }
     });
     invoke<{ command: string; args: string[]; auto_start: boolean }>("get_engine_config").then(
@@ -70,6 +106,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
       }
     });
     checkPython();
+    loadModelsOnOpen();
   }, []);
 
   const checkPython = () => {
@@ -85,10 +122,119 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
       });
   };
 
+  // Stale-while-revalidate: paint instantly from whatever's cached on
+  // disk (near-instant, no network round trip), then always kick off a
+  // background refresh so the list stays current. The refresh itself is
+  // a plain async `invoke` handled entirely on the Rust side, so it
+  // never blocks typing or navigation while it's in flight — only the
+  // very first launch, with nothing cached yet, shows a loading state.
+  const loadModelsOnOpen = async () => {
+    if (hasLoadedModelsOnce.current) return;
+    hasLoadedModelsOnce.current = true;
+    try {
+      const cache = await invoke<ModelsCache | null>("get_cached_models");
+      if (cache && cache.models?.length) {
+        setModels(cache.models);
+        setModelsFetchedAt(cache.fetched_at);
+        setModelsLoading(false);
+        if (Date.now() - cache.fetched_at < MODELS_STALE_MS) {
+          return; // fresh enough — skip the extra background round trip
+        }
+      }
+    } catch {
+      // no cache yet, fall through to a foreground fetch below
+    }
+    refreshModels({ quiet: true });
+  };
+
+  const refreshModels = async (opts: { quiet?: boolean } = {}) => {
+    if (opts.quiet) {
+      setModelsSyncing(true);
+    } else {
+      setModelsRefreshing(true);
+    }
+    setModelsError(null);
+    try {
+      const res = await invoke<ModelsCache>("fetch_omniroute_models");
+      setModels(res.models);
+      setModelsFetchedAt(res.fetched_at);
+    } catch (e) {
+      setModelsError(typeof e === "string" ? e : "Couldn't load the model list.");
+    } finally {
+      setModelsLoading(false);
+      setModelsSyncing(false);
+      setModelsRefreshing(false);
+    }
+  };
+
+  const activeModelId = defaultModel && defaultModel.trim() ? defaultModel : BUILTIN_DEFAULT_MODEL;
+
+  const filteredModels = useMemo(() => {
+    const q = modelSearch.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter(
+      (m) =>
+        m.id.toLowerCase().includes(q) ||
+        (m.owned_by ?? "").toLowerCase().includes(q)
+    );
+  }, [models, modelSearch]);
+
+  const selectModel = async (id: string) => {
+    if (id === activeModelId || selectingModel) return;
+    setSelectingModel(id);
+    setTestStatus("idle");
+    setTestMessage(null);
+    try {
+      await invoke("set_default_model", { model: id });
+      setDefaultModel(id);
+      setJustSavedModel(id);
+      setTimeout(() => setJustSavedModel((cur) => (cur === id ? null : cur)), 1100);
+    } catch (e) {
+      setModelsError(typeof e === "string" ? e : "Couldn't set that as the default model.");
+    } finally {
+      setSelectingModel(null);
+    }
+  };
+
+  const resetDefaultModel = async () => {
+    if (activeModelId === BUILTIN_DEFAULT_MODEL || selectingModel) return;
+    setSelectingModel("__reset__");
+    setTestStatus("idle");
+    setTestMessage(null);
+    try {
+      await invoke("set_default_model", { model: null });
+      setDefaultModel(null);
+      setJustSavedModel(BUILTIN_DEFAULT_MODEL);
+      setTimeout(() => setJustSavedModel((cur) => (cur === BUILTIN_DEFAULT_MODEL ? null : cur)), 1100);
+    } catch (e) {
+      setModelsError(typeof e === "string" ? e : "Couldn't reset the default model.");
+    } finally {
+      setSelectingModel(null);
+    }
+  };
+
+  const testActiveModel = async () => {
+    if (testStatus === "testing") return;
+    setTestStatus("testing");
+    setTestMessage(null);
+    try {
+      const res = await invoke<ModelTestResult>("test_model", { model: activeModelId });
+      setTestStatus(res.ok ? "ok" : "fail");
+      setTestMessage(res.message);
+    } catch (e) {
+      setTestStatus("fail");
+      setTestMessage(typeof e === "string" ? e : "Couldn't reach the model.");
+    }
+  };
+
   const buildConfig = (): OmniRouteConfigPayload => ({
     mode,
     remote_url: mode === "remote" ? remoteUrl : null,
     api_key: mode === "remote" ? apiKey : null,
+    // Carried through so saving the connection settings never wipes out
+    // a default model chosen via the picker below — this button only
+    // ever touches mode/URL/key, but the backend struct is one record.
+    default_model: defaultModel,
   });
 
   const test = async () => {
@@ -132,7 +278,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   };
 
   const tabs = [
-    { id: "omniroute" as const, label: "OmniRoute & Engine", icon: "🔌", keywords: "omniroute connection engine process mode local remote api key command args" },
+    { id: "omniroute" as const, label: "OmniRoute & Engine", icon: "🔌", keywords: "omniroute connection engine process mode local remote api key command args default model models picker search refresh test active reset" },
     { id: "defaults" as const, label: "Session Defaults", icon: "⚙️", keywords: "session defaults planning mode sub-agents subagents graceful stop" },
     { id: "github" as const, label: "GitHub Integration", icon: "🐙", keywords: "github token personal access token connect disconnect repo issues pull requests" },
     { id: "workspaces" as const, label: "Workspaces", icon: "📁", keywords: "workspaces folder directory project active workspace path add folder" },
@@ -191,6 +337,126 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
           <button className={`primary ${saved ? "saved" : ""}`} onClick={save}>
             {saved ? "Saved" : "Save"}
           </button>
+        </div>
+      </section>
+
+      <section className="model-picker-section">
+        <div className="model-picker-header">
+          <h3>Default model</h3>
+          <div className="active-model-badge">
+            <span className="active-model-dot" />
+            <span className="active-model-label">Active:</span>
+            <strong>{activeModelId}</strong>
+          </div>
+        </div>
+        <p className="hint small">
+          Pick which model new turns and sub-agents are sent to. Selecting a
+          model saves it right away — leave it on the built-in default if
+          you're not sure.
+        </p>
+
+        <div className="model-picker-toolbar">
+          <div className="model-search-bar">
+            <svg className="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search models..."
+              value={modelSearch}
+              onChange={(e) => setModelSearch(e.target.value)}
+            />
+            {modelSearch && (
+              <button className="search-clear-btn" onClick={() => setModelSearch("")}>
+                ✕
+              </button>
+            )}
+          </div>
+          <div className="model-toolbar-actions">
+            <button
+              className={`model-refresh-btn ${modelsRefreshing ? "spinning" : ""}`}
+              onClick={() => refreshModels()}
+              disabled={modelsRefreshing}
+              title="Refresh the model list"
+            >
+              <svg className="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+                <path d="M21 2v6h-6" />
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M3 22v-6h6" />
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+              </svg>
+              {modelsRefreshing ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              className="model-test-btn"
+              onClick={testActiveModel}
+              disabled={testStatus === "testing"}
+              title="Send a live test request to the active model"
+            >
+              {testStatus === "testing" && <span className="mini-spinner" />}
+              {testStatus === "testing" ? "Testing…" : "Test model"}
+            </button>
+            <button
+              className="small"
+              onClick={resetDefaultModel}
+              disabled={activeModelId === BUILTIN_DEFAULT_MODEL || selectingModel === "__reset__"}
+              title="Revert to the built-in default model"
+            >
+              Reset to default
+            </button>
+          </div>
+        </div>
+
+        {testStatus === "ok" && <div className="ok model-test-result">{testMessage}</div>}
+        {testStatus === "fail" && <div className="fail model-test-result">{testMessage}</div>}
+
+        <div className="model-list-meta">
+          {modelsSyncing && !modelsRefreshing && (
+            <span className="model-syncing-hint">
+              <span className="model-syncing-dot" /> Syncing latest list…
+            </span>
+          )}
+          {!modelsSyncing && modelsFetchedAt && (
+            <span className="hint small">Updated {formatRelativeTime(modelsFetchedAt)}</span>
+          )}
+        </div>
+
+        {modelsError && <p className="fail model-error-msg">{modelsError}</p>}
+
+        <div className="model-list">
+          {modelsLoading ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="model-row-skeleton" style={{ animationDelay: `${i * 0.06}s` }} />
+            ))
+          ) : filteredModels.length === 0 ? (
+            <div className="model-list-empty">
+              {modelSearch
+                ? `No models matching "${modelSearch}"`
+                : "No models found yet — try refreshing."}
+            </div>
+          ) : (
+            filteredModels.map((m, i) => {
+              const isActive = m.id === activeModelId;
+              const isSelecting = selectingModel === m.id;
+              const justSaved = justSavedModel === m.id;
+              return (
+                <button
+                  key={m.id}
+                  className={`model-row ${isActive ? "active" : ""} ${justSaved ? "just-saved" : ""}`}
+                  onClick={() => selectModel(m.id)}
+                  disabled={isSelecting}
+                  style={{ animationDelay: `${Math.min(i, 20) * 0.02}s` }}
+                >
+                  <span className="model-row-radio" />
+                  <span className="model-row-id">{m.id}</span>
+                  {m.owned_by && <span className="model-row-owner">{m.owned_by}</span>}
+                  {isSelecting && <span className="mini-spinner" />}
+                  {isActive && !isSelecting && <span className="model-row-active-tag">Active</span>}
+                </button>
+              );
+            })
+          )}
         </div>
       </section>
 
