@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import type { ToolCallEventPayload } from "../types";
+import type { ToolCallEventPayload, PlanItem } from "../types";
+import PlanDrawer from "./PlanDrawer";
 import GithubToolCard from "./GithubToolCard";
 import ToolCallRow from "./ToolCallRow";
 import DiffToolCard from "./DiffToolCard";
@@ -13,6 +14,7 @@ interface Props {
   onBack: () => void;
   onPromptFix: (text: string) => void;
   onApprove: (callId: string, approved: boolean) => void;
+  plan?: PlanItem[];
 }
 
 export default function SubagentView({
@@ -22,6 +24,7 @@ export default function SubagentView({
   onBack,
   onPromptFix,
   onApprove,
+  plan,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -37,7 +40,8 @@ export default function SubagentView({
   const isRunning = event.status === "start" || event.status === "awaiting-approval";
 
   return (
-    <div className="subagent-view-container">
+    <div className="subagent-view-container" style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {plan && plan.length > 0 && <PlanDrawer plan={plan} title="Sub-agent Task Plan" />}
       <div className="subagent-view-header">
         <button type="button" className="subagent-back-btn" onClick={onBack}>
           <span className="back-icon">←</span> Back to Main Chat

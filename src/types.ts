@@ -1,3 +1,8 @@
+export interface PlanItem {
+  content: string;
+  status: string;
+}
+
 export interface SessionDefaults {
   planning_enabled: boolean;
   subagents_enabled: boolean;

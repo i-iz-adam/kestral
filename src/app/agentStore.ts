@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/tauri";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  PlanItem,
   Session,
   ToolCallEventPayload,
   MessageEventPayload,
@@ -31,6 +32,7 @@ export interface SessionRecord {
   liveCalls: ToolCallEventPayload[];
   /** Sub-agent calls grouped by parent_call_id, persisted in memory across turn ends */
   subagentCalls: Record<string, ToolCallEventPayload[]>;
+  plan: PlanItem[];
   sending: boolean;
   /** True once a turn finishes for this session while it wasn't the one
    * on screen — cleared by setActiveSession the moment the person opens
@@ -41,7 +43,7 @@ export interface SessionRecord {
 }
 
 function emptyRecord(): SessionRecord {
-  return { session: null, timeline: [], liveCalls: [], subagentCalls: {}, sending: false, unseenActivity: false };
+  return { session: null, timeline: [], liveCalls: [], subagentCalls: {}, plan: [], sending: false, unseenActivity: false };
 }
 
 // Stable snapshot for unknown sessions. useSyncExternalStore requires
@@ -187,9 +189,12 @@ export function setActiveSession(sessionId: string | null) {
  * on every SessionView mount, same as before — the difference now is that
  * the live buffer alongside it survives independently of that mount. */
 export async function loadSession(sessionId: string): Promise<void> {
-  const session = await invoke<Session>("get_session", { id: sessionId });
+  const [session, plan] = await Promise.all([
+    invoke<Session>("get_session", { id: sessionId }).catch(() => null),
+    invoke<PlanItem[]>("get_session_plan", { id: sessionId }).catch(() => []),
+  ]);
   if (session) {
-    patch(sessionId, { session });
+    patch(sessionId, { session, plan: plan ?? [] });
   }
 }
 
@@ -349,6 +354,12 @@ export function ensureAgentEventsStarted() {
         },
       ],
     });
+  });
+
+  
+  listen<{ session_id: string; items: PlanItem[] }>("agent://plan-updated", (evt) => {
+    const { session_id, items } = evt.payload;
+    patch(session_id, { plan: items });
   });
 
   listen<{ session_id: string; title: string }>("agent://session-title-updated", (evt) => {

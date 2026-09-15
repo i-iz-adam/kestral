@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
+use tauri::Manager;
 
 /// One entry in a session's plan. Status is a plain string rather than an
 /// enum so a future status value from a newer app version doesn't fail to
@@ -129,6 +130,15 @@ pub fn maybe_execute(app_handle: &tauri::AppHandle, session_id: &str, name: &str
     if let Err(e) = save(app_handle, session_id, &items) {
         return Some(Err(e));
     }
+    let _ = app_handle.emit_all(
+        "agent://plan-updated",
+        json!({ "session_id": session_id, "items": items }),
+    );
     let done = items.iter().filter(|i| i.status == "completed").count();
     Some(Ok(format!("Plan updated: {} step(s), {} completed.", items.len(), done)))
+}
+
+#[tauri::command]
+pub fn get_session_plan(app_handle: tauri::AppHandle, id: String) -> Vec<PlanItem> {
+    load(&app_handle, &id)
 }

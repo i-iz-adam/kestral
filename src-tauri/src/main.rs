@@ -541,6 +541,7 @@ fn main() {
             set_session_planning,
             set_session_sandbox_shell,
             set_session_sandbox_network,
+            plan::get_session_plan,
             approve_all_pending,
             send_message,
             stop_session,
