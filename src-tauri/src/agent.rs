@@ -711,6 +711,7 @@ async fn run_turn_inner(
         images: images.clone(),
         ..Default::default()
     });
+    sessions::save(app_handle, &session);
     let _ = app_handle.emit_all(
         "agent://message",
         MessageEvent {

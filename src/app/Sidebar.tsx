@@ -10,6 +10,7 @@ import {
   setCurrentWorkspaceFilter,
   subscribeWorkspaceFilter,
   getSendingSessionsOutsideWorkspace,
+  getRecord,
 } from "./agentStore";
 
 type Mode = "coding" | "general";
@@ -44,6 +45,7 @@ export default function Sidebar({
   const [currentWorkspaceFilter, setCurrentWorkspaceFilterState] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [, setTick] = useState(0);
 
   // Refresh workspaces list
   const refreshWorkspaces = useCallback(() => {
@@ -61,7 +63,10 @@ export default function Sidebar({
     refreshWorkspaces();
 
     // Subscribe to session changes
-    const unsubSessions = subscribeAny(fetchSessions);
+    const unsubSessions = subscribeAny(() => {
+      fetchSessions();
+      setTick((t) => t + 1);
+    });
     // Subscribe to workspace filter changes
     const unsubFilter = subscribeWorkspaceFilter(() => {
       setCurrentWorkspaceFilterState(getCurrentWorkspaceFilter());
@@ -89,11 +94,27 @@ export default function Sidebar({
     return s.workspace === currentWorkspaceFilter;
   });
 
+  // Sort sessions: active runs float to the top; completed sessions follow ordered by updated_at (or created_at) descending.
+  const sortedSessions = [...filteredSessions].sort((a, b) => {
+    const aActive = getRecord(a.id).sending;
+    const bActive = getRecord(b.id).sending;
+    if (aActive !== bActive) {
+      return aActive ? -1 : 1;
+    }
+    const aTime = a.updated_at ?? a.created_at;
+    const bTime = b.updated_at ?? b.created_at;
+    return bTime - aTime;
+  });
+
   // Sessions from other workspaces with active agents
   const externalActiveSessions = currentWorkspaceFilter
-    ? getSendingSessionsOutsideWorkspace(currentWorkspaceFilter).filter(
-        (rec) => rec.session
-      )
+    ? getSendingSessionsOutsideWorkspace(currentWorkspaceFilter)
+        .filter((rec): rec is typeof rec & { session: Session } => rec.session !== null)
+        .sort((a, b) => {
+          const aTime = a.session.updated_at ?? a.session.created_at;
+          const bTime = b.session.updated_at ?? b.session.created_at;
+          return bTime - aTime;
+        })
     : [];
 
   const handleWorkspaceFilterChange = (path: string | null) => {
@@ -183,7 +204,7 @@ export default function Sidebar({
       )}
 
       <div className="session-list">
-        {filteredSessions.map((s) => (
+        {sortedSessions.map((s) => (
           <SessionListItem
             key={s.id}
             session={s}
@@ -193,7 +214,7 @@ export default function Sidebar({
             getWorkspaceName={getWorkspaceName}
           />
         ))}
-        {filteredSessions.length === 0 && externalActiveSessions.length === 0 && (
+        {sortedSessions.length === 0 && externalActiveSessions.length === 0 && (
           <p className="hint small">No sessions yet.</p>
         )}
       </div>

@@ -29,6 +29,7 @@ export interface Session {
   subagents_enabled: boolean;
   messages: ChatMessage[];
   created_at: number;
+  updated_at?: number;
 }
 
 export interface Workspace {

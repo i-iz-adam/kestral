@@ -32,6 +32,11 @@ pub struct Session {
     pub graceful_stop: bool,
     pub messages: Vec<ChatMessage>,
     pub created_at: u64,
+    /// Timestamp (UNIX epoch milliseconds) when this session was last updated.
+    /// Defaults to None for older sessions saved before this field existed,
+    /// in which case `effective_updated_at()` falls back to `created_at`.
+    #[serde(default)]
+    pub updated_at: Option<u64>,
     /// Counts turns since the last skill-distillation reflection pass (see
     /// reflect.rs) â€” debounces it to roughly once every REFLECT_EVERY_N_TURNS
     /// turns that did real (mutating/delegated) work, rather than running an
@@ -60,6 +65,12 @@ pub struct Session {
     pub sandbox_network: bool,
 }
 
+impl Session {
+    pub fn effective_updated_at(&self) -> u64 {
+        self.updated_at.unwrap_or(self.created_at)
+    }
+}
+
 fn sessions_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
         .path_resolver()
@@ -86,6 +97,7 @@ pub fn create(
     subagents_enabled: bool,
     graceful_stop: bool,
 ) -> Session {
+    let now = now_ms();
     let session = Session {
         id: Uuid::new_v4().to_string(),
         title,
@@ -95,7 +107,8 @@ pub fn create(
         subagents_enabled,
         graceful_stop,
         messages: vec![],
-        created_at: now_ms(),
+        created_at: now,
+        updated_at: Some(now),
         turns_since_reflection: 0,
         sandbox_shell: false,
         sandbox_network: false,
@@ -154,8 +167,10 @@ pub fn set_planning_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bo
 }
 
 pub fn save(app_handle: &tauri::AppHandle, session: &Session) {
-    let path = sessions_dir(app_handle).join(format!("{}.json", session.id));
-    if let Ok(data) = serde_json::to_string_pretty(session) {
+    let mut session_to_save = session.clone();
+    session_to_save.updated_at = Some(now_ms());
+    let path = sessions_dir(app_handle).join(format!("{}.json", session_to_save.id));
+    if let Ok(data) = serde_json::to_string_pretty(&session_to_save) {
         let _ = fs::write(path, data);
     }
 }
@@ -178,11 +193,125 @@ pub fn list(app_handle: &tauri::AppHandle) -> Vec<Session> {
             }
         }
     }
-    sessions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    sessions.sort_by(|a, b| {
+        b.effective_updated_at()
+            .cmp(&a.effective_updated_at())
+            .then_with(|| b.created_at.cmp(&a.created_at))
+    });
     sessions
 }
 
 pub fn delete(app_handle: &tauri::AppHandle, id: &str) {
     let path = sessions_dir(app_handle).join(format!("{}.json", id));
     let _ = fs::remove_file(path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_effective_updated_at_fallback() {
+        let session = Session {
+            id: "1".into(),
+            title: "Test".into(),
+            mode: "coding".into(),
+            planning_enabled: false,
+            workspace: "".into(),
+            subagents_enabled: true,
+            graceful_stop: true,
+            messages: vec![],
+            created_at: 1000,
+            updated_at: None,
+            turns_since_reflection: 0,
+            sandbox_shell: false,
+            sandbox_network: false,
+        };
+        assert_eq!(session.effective_updated_at(), 1000);
+
+        let session_with_updated = Session {
+            updated_at: Some(2000),
+            ..session
+        };
+        assert_eq!(session_with_updated.effective_updated_at(), 2000);
+    }
+
+    #[test]
+    fn test_legacy_session_json_deserialization() {
+        let legacy_json = r#"{
+            "id": "test-legacy",
+            "title": "Legacy Session",
+            "mode": "coding",
+            "planning_enabled": false,
+            "workspace": "/tmp",
+            "messages": [],
+            "created_at": 1700000000000
+        }"#;
+
+        let session: Session = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(session.created_at, 1700000000000);
+        assert_eq!(session.updated_at, None);
+        assert_eq!(session.effective_updated_at(), 1700000000000);
+    }
+
+    #[test]
+    fn test_session_sorting_by_updated_at() {
+        let mut sessions = vec![
+            Session {
+                id: "old-created-recently-updated".into(),
+                title: "Old Chat".into(),
+                mode: "coding".into(),
+                planning_enabled: false,
+                workspace: "".into(),
+                subagents_enabled: true,
+                graceful_stop: true,
+                messages: vec![],
+                created_at: 1000,
+                updated_at: Some(5000),
+                turns_since_reflection: 0,
+                sandbox_shell: false,
+                sandbox_network: false,
+            },
+            Session {
+                id: "newly-created".into(),
+                title: "New Chat".into(),
+                mode: "coding".into(),
+                planning_enabled: false,
+                workspace: "".into(),
+                subagents_enabled: true,
+                graceful_stop: true,
+                messages: vec![],
+                created_at: 3000,
+                updated_at: Some(3000),
+                turns_since_reflection: 0,
+                sandbox_shell: false,
+                sandbox_network: false,
+            },
+            Session {
+                id: "legacy-session".into(),
+                title: "Legacy Chat".into(),
+                mode: "coding".into(),
+                planning_enabled: false,
+                workspace: "".into(),
+                subagents_enabled: true,
+                graceful_stop: true,
+                messages: vec![],
+                created_at: 2000,
+                updated_at: None,
+                turns_since_reflection: 0,
+                sandbox_shell: false,
+                sandbox_network: false,
+            },
+        ];
+
+        sessions.sort_by(|a, b| {
+            b.effective_updated_at()
+                .cmp(&a.effective_updated_at())
+                .then_with(|| b.created_at.cmp(&a.created_at))
+        });
+
+        assert_eq!(sessions[0].id, "old-created-recently-updated");
+        assert_eq!(sessions[1].id, "newly-created");
+        assert_eq!(sessions[2].id, "legacy-session");
+    }
 }
