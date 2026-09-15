@@ -523,6 +523,7 @@ button:not(:disabled):hover {
   flex-direction: column;
   padding: 1rem;
   gap: 10px;
+  overflow-x: hidden;
 }
 
 .mode-toggle {
@@ -588,6 +589,7 @@ button:not(:disabled):hover {
 .session-list {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -615,6 +617,9 @@ button:not(:disabled):hover {
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   animation: session-spring-in 0.4s var(--ease-spring) both;
   transition: background-color 0.15s var(--ease), transform 0.15s var(--ease),
     border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
@@ -674,6 +679,8 @@ button:not(:disabled):hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .session-mode {
@@ -5675,6 +5682,8 @@ button.github-card:hover {
   align-items: center;
   gap: 6px;
   width: 100%;
+  min-width: 0;
+  flex: 1;
 }
 
 .session-checkbox {
