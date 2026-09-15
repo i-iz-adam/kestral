@@ -59,8 +59,10 @@ export default function ToolCallRow({
 }) {
   const argSummary = summarizeArgs(event.name, event.args);
   const [selectedImage, setSelectedImage] = useState<ExtractedImage | null>(null);
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
 
-  const images = event.result ? extractImagesFromText(event.result) : [];
+  const rawImages = event.result ? extractImagesFromText(event.result) : [];
+  const images = rawImages.filter((img) => !failedImages.has(img.src));
 
   // This component mounts exactly once per call_id, right as the real
   // "start" event arrives (see the stable key in SessionView) — so
@@ -102,7 +104,13 @@ export default function ToolCallRow({
               onClick={() => setSelectedImage(img)}
               title={`View ${img.name}`}
             >
-              <img src={img.src} alt={img.name} />
+              <img
+                src={img.src}
+                alt={img.name}
+                onError={() => {
+                  setFailedImages((prev) => new Set(prev).add(img.src));
+                }}
+              />
               <span className="tool-image-name">{img.name}</span>
             </div>
           ))}

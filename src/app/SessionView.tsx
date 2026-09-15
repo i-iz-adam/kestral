@@ -7,7 +7,6 @@ import SubagentCard from "./SubagentCard";
 import SubagentView from "./SubagentView";
 import DiffToolCard from "./DiffToolCard";
 import MessageContent from "./MessageContent";
-import WorkspacePicker from "./WorkspacePicker";
 import { buildHistoryTimeline } from "./historyTimeline";
 import { looksLikeSlashCommand, parseSlashCommand, filterSlashCommands, SLASH_HELP, type SlashCommandDef } from "./slashCommands";
 import SlashCommandMenu from "./SlashCommandMenu";
@@ -22,27 +21,13 @@ import {
 } from "./agentStore";
 import { useAgentSession } from "./useAgentSession";
 
-/** Last path segment for display — "/Users/adam/projects/kestrel" reads
- * as "kestrel" in the header badge, with the full path still available
- * via the title tooltip. Falls back to the whole string for a bare
- * drive root or an unexpected empty value. */
-function folderName(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, "");
-  const parts = trimmed.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
-}
-
 export default function SessionView({ sessionId }: { sessionId: string }) {
   // Live turn state (timeline/liveCalls/sending) and the persisted session
   // record both come from a global store that keeps running regardless of
-  // whether this component is mounted — see agentStore.ts. Switching to
-  // another session and back (or opening Providers/Settings, which used
-  // to unmount this entirely) no longer loses a turn in progress.
+  // whether this component is mounted — see agentStore.ts.
   const { session, timeline, liveCalls, subagentCalls, sending } = useAgentSession(sessionId);
   const [input, setInput] = useState("");
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
-  const [editingWorkspace, setEditingWorkspace] = useState(false);
-  const [workspaceDraft, setWorkspaceDraft] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [activeSubagentId, setActiveSubagentId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -54,10 +39,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     setActiveSubagentId(null);
   }, [sessionId]);
 
-  // Command menu's filtered list is recomputed from `input` on every
-  // render (cheap — a handful of string comparisons over ~4 commands);
-  // the highlighted row resets to the top whenever the match set changes
-  // so it can't point past the end of a shorter list after a keystroke.
   const slashMatches = input.startsWith("/") ? filterSlashCommands(input) : [];
   useEffect(() => {
     setSlashIndex(0);
@@ -74,11 +55,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   };
 
-  // Reconstructed once per session load (not on every incidental local
-  // state tweak, like toggling sub-agents) — this is what makes tool call
-  // cards and past replies survive a session switch or app restart,
-  // instead of only existing for the lifetime of the live `timeline`
-  // above, which starts empty every time this component mounts.
   const historyItems = useMemo(
     () => (session ? buildHistoryTimeline(session.messages) : []),
     [session?.messages]
@@ -102,16 +78,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   }, [timeline]);
 
-  // Local-only feedback for a slash command — never touches session.messages
-  // or the model, so it doesn't cost a turn and disappears like any other
-  // ephemeral UI state if you switch sessions and back.
   const pushSystemNote = (text: string) => storePushSystemNote(sessionId, text);
 
-  // Shared by the "/auto"/"/plan off" slash commands and the header's
-  // Planning pill — draining pending approvals here (rather than only
-  // flipping the setting) is what makes turning planning off actually
-  // unstick a turn that's already sitting on an approval prompt, instead
-  // of only affecting calls made from this point on.
   const turnPlanningOff = async () => {
     await invoke("set_session_planning", { id: sessionId, enabled: false });
     const resolved = await invoke<number>("approve_all_pending", { sessionId, approved: true });
@@ -158,12 +126,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   };
 
-  // Downscales attached images before they ever hit Tauri IPC or the
-  // LLM payload — a raw screenshot data-URL is multiple MB of base64,
-  // which risks IPC/serialization failure (a rejected `send_message`
-  // invoke with no `turn-end` used to wedge `sending` on forever) and
-  // oversized chat-completion bodies. Vision models gain nothing past
-  // ~1568px on the long edge, so this is pure overhead removed.
   const MAX_IMAGE_DIM = 1568;
 
   const downscaleDataUrl = (dataUrl: string): Promise<string> =>
@@ -184,7 +146,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           return;
         }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        // Keep PNG for transparency-safe images, otherwise JPEG is ~5x smaller.
         const outMime = dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg";
         try {
           resolve(canvas.toDataURL(outMime, 0.85));
@@ -246,12 +207,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     });
   };
 
-  // The Stop button's handler — the backend sets a stop flag for the
-  // session, resolves any pending approvals, and lets the running turn
-  // (and any live sub-agents) wind down, persisting what it got through.
-  // The agent://turn-end event carries reason "stopped" and the store
-  // turns that into a system note, so there's nothing to do here beyond
-  // firing the request and avoiding an unhandled rejection.
   const stop = () => {
     invoke("stop_session", { sessionId }).catch(() => {});
   };
@@ -265,18 +220,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     composerRef.current?.focus();
   };
 
-  const saveWorkspace = async (path: string) => {
-    await invoke("set_session_workspace", { id: sessionId, workspace: path });
-    mutateSessionLocally(sessionId, (s) => ({ ...s, workspace: path }));
-    setEditingWorkspace(false);
-    pushSystemNote(`Workspace switched to ${path}.`);
-  };
-
   if (!session) return <div className="loading-screen">Loading session...</div>;
 
-  // Shared by both the live timeline and the reconstructed history below —
-  // a tool call renders the same way regardless of whether it just
-  // happened or is being replayed from disk.
   const renderToolCard = (call: ToolCallEventPayload, nested: ToolCallEventPayload[]) => {
     if (call.name === "__skill_loaded__") {
       return <SkillLoadedCard key={call.call_id} event={call} />;
@@ -308,10 +253,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     return <ToolCallRow key={call.call_id} event={call} onApprove={approve} />;
   };
 
-  // Persisted turns from earlier in this session (or from before the app
-  // was last closed) — reconstructed once above via buildHistoryTimeline.
-  // Grouped the same way the live timeline is, just with no nested calls
-  // to look up (sub-agent steps aren't persisted, only their summary).
   const historyNodes: JSX.Element[] = [];
   for (let i = 0; i < historyItems.length; ) {
     const item = historyItems[i];
@@ -339,11 +280,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   }
 
-  // Consecutive tool-call entries render grouped inside one .tool-stream
-  // wrapper (tight spacing, like a mini timeline of its own); message
-  // entries render standalone. The grouping is purely visual — the order
-  // itself already comes straight from `timeline`, which is what keeps a
-  // final reply from ever jumping above the tool calls that produced it.
   const timelineNodes: JSX.Element[] = [];
   for (let i = 0; i < timeline.length; ) {
     const item = timeline[i];
@@ -382,9 +318,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   }
 
-  // Covers the brief gap between hitting Send and the backend's first
-  // message-start event — after that, the streaming placeholder bubble
-  // itself (with its blinking cursor) is the "thinking" indicator.
   const showThinking =
     sending && !timeline.some((item) => item.kind === "message" && item.streaming);
 
@@ -423,31 +356,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         />
         <h2>{session.title}</h2>
         <span className="hint">{session.mode}</span>
-        <div className="repo-link">
-          {editingWorkspace ? (
-            <span onBlur={() => setTimeout(() => setEditingWorkspace(false), 150)}>
-              <WorkspacePicker
-                className="inline"
-                value={workspaceDraft ?? session.workspace}
-                onChange={(path) => {
-                  setWorkspaceDraft(path);
-                  saveWorkspace(path);
-                }}
-              />
-            </span>
-          ) : (
-            <button
-              className="repo-badge workspace-badge"
-              onClick={() => {
-                setWorkspaceDraft(session.workspace);
-                setEditingWorkspace(true);
-              }}
-              title={session.workspace}
-            >
-              {folderName(session.workspace)}
-            </button>
-          )}
-        </div>
       </div>
 
       <div className="message-list">

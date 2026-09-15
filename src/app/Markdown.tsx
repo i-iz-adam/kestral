@@ -2,6 +2,7 @@ import { useMemo, type MouseEvent } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { open } from "@tauri-apps/api/shell";
+import { convertFileSrc } from "@tauri-apps/api/tauri";
 
 marked.setOptions({
   breaks: true,
@@ -18,16 +19,48 @@ export default function Markdown({ content, caret }: { content: string; caret?: 
   const html = useMemo(() => {
     if (!content) return "";
     const raw = marked.parse(content, { async: false }) as string;
-    return DOMPurify.sanitize(raw, {
+    let sanitized = DOMPurify.sanitize(raw, {
       ALLOWED_TAGS: [
         "p", "br", "hr",
         "strong", "em", "del", "code", "pre", "blockquote",
         "ul", "ol", "li",
         "h1", "h2", "h3", "h4", "h5", "h6",
-        "a", "table", "thead", "tbody", "tr", "th", "td", "span",
+        "a", "table", "thead", "tbody", "tr", "th", "td", "span", "img",
       ],
-      ALLOWED_ATTR: ["href", "title", "class"],
+      ALLOWED_ATTR: ["href", "title", "class", "src", "alt"],
     });
+
+    // Remove empty paragraphs left by stripped tags or empty lines
+    sanitized = sanitized.replace(/<p>\s*<\/p>/gi, "");
+
+    // Process img tags to convert local file paths and attach onerror fallbacks
+    const dom = new DOMParser().parseFromString(sanitized, "text/html");
+    const imgs = dom.querySelectorAll("img");
+    if (imgs.length > 0) {
+      imgs.forEach((img) => {
+        const src = img.getAttribute("src");
+        if (
+          src &&
+          !src.startsWith("data:") &&
+          !src.startsWith("http://") &&
+          !src.startsWith("https://") &&
+          !src.startsWith("asset://")
+        ) {
+          try {
+            img.setAttribute("src", convertFileSrc(src));
+          } catch {
+            // Keep original if convertFileSrc fails
+          }
+        }
+        img.setAttribute(
+          "onerror",
+          "this.style.display='none';if(this.parentElement&&this.parentElement.tagName==='P'&&!this.parentElement.textContent.trim()){this.parentElement.style.display='none';}"
+        );
+      });
+      return dom.body.innerHTML;
+    }
+
+    return sanitized;
   }, [content]);
 
   // Links should open in the person's actual browser, not navigate the

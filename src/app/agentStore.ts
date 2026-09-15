@@ -59,15 +59,50 @@ const nextKey = (prefix: string) => `live-${prefix}-${++keySeq}`;
 /** The currently selected workspace filter — drives which sessions appear in
  * the sidebar. When null, shows all sessions; when set, shows only sessions
  * from that workspace. Separate from the workspace selected for new sessions. */
-let currentWorkspaceFilter: string | null = null;
+
+const ACTIVE_WORKSPACE_KEY = "kestrel_active_workspace";
+
+let activeWorkspace: string | null = (() => {
+  try {
+    return localStorage.getItem(ACTIVE_WORKSPACE_KEY);
+  } catch {
+    return null;
+  }
+})();
+
+const activeWorkspaceSubscribers = new Set<() => void>();
+
+export function getActiveWorkspace(): string | null {
+  return activeWorkspace;
+}
+
+export function setActiveWorkspace(path: string | null) {
+  activeWorkspace = path;
+  setActiveWorkspace(path);
+  try {
+    if (path) {
+      localStorage.setItem(ACTIVE_WORKSPACE_KEY, path);
+    } else {
+      localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+    }
+  } catch {}
+  activeWorkspaceSubscribers.forEach((cb) => cb());
+  workspaceSubscribers.forEach((cb) => cb());
+  notifyAny();
+}
+
+export function subscribeActiveWorkspace(cb: () => void): () => void {
+  activeWorkspaceSubscribers.add(cb);
+  return () => activeWorkspaceSubscribers.delete(cb);
+}
 const workspaceSubscribers = new Set<() => void>();
 
 export function getCurrentWorkspaceFilter(): string | null {
-  return currentWorkspaceFilter;
+  return activeWorkspace;
 }
 
 export function setCurrentWorkspaceFilter(path: string | null) {
-  currentWorkspaceFilter = path;
+  setActiveWorkspace(path);
   workspaceSubscribers.forEach((cb) => cb());
   notifyAny();
 }

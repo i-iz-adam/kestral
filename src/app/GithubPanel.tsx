@@ -18,11 +18,19 @@ export default function GithubPanel() {
 
   useEffect(() => {
     invoke<string | null>("get_github_token").then((t) => {
-      if (t) setToken(t);
+      if (t) {
+        setToken(t);
+        setBusy(true);
+        invoke<string>("test_github_token", { token: t })
+          .then((login) => setConnected(login))
+          .catch(() => setConnected(null))
+          .finally(() => setBusy(false));
+      }
     });
   }, []);
 
   const connect = async () => {
+    if (!token.trim()) return;
     setError(null);
     setBusy(true);
     try {
@@ -32,6 +40,21 @@ export default function GithubPanel() {
     } catch (e) {
       setError(String(e));
       setConnected(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await invoke("save_github_token", { token: "" });
+      setToken("");
+      setConnected(null);
+      setIssues([]);
+    } catch (e) {
+      setError(String(e));
     } finally {
       setBusy(false);
     }
@@ -55,25 +78,38 @@ export default function GithubPanel() {
   };
 
   return (
-    <div className="settings-view">
-      <h2>GitHub</h2>
-
+    <div className="github-settings-panel">
       <section>
         <h3>Connection</h3>
-        <div className="field-group">
-          <label>Personal access token</label>
-          <input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            type="password"
-            placeholder="ghp_..."
-          />
-        </div>
-        <button className="primary" onClick={connect} disabled={busy}>
-          Connect
-        </button>
-        {connected && <p className="ok">Connected as {connected}</p>}
-        {error && <p className="fail">{error}</p>}
+        {connected ? (
+          <div className="github-connected-card">
+            <div className="github-status-badge">
+              <span className="pulsing-dot" />
+              <span>
+                Connected as <strong>{connected}</strong>
+              </span>
+            </div>
+            <button className="button-disconnect" onClick={disconnect} disabled={busy}>
+              {busy ? "Disconnecting..." : "Disconnect"}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div className="field-group">
+              <label>Personal access token</label>
+              <input
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                type="password"
+                placeholder="ghp_..."
+              />
+            </div>
+            <button className="primary" onClick={connect} disabled={busy || !token.trim()}>
+              {busy ? "Connecting..." : "Connect"}
+            </button>
+          </div>
+        )}
+        {error && <p className="fail" style={{ marginTop: 8 }}>{error}</p>}
       </section>
 
       <section>
@@ -91,7 +127,7 @@ export default function GithubPanel() {
             placeholder="repo"
             style={{ width: 120 }}
           />
-          <button onClick={loadIssues} disabled={busy}>
+          <button onClick={loadIssues} disabled={busy || !token}>
             Load issues
           </button>
         </div>

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import SessionView from "./SessionView";
-import Settings from "./Settings";
-import GithubPanel from "./GithubPanel";
+import Settings, { type SettingsTab } from "./Settings";
+import WorkspacePanel from "./WorkspacePanel";
 import SkillsPanel from "./SkillsPanel";
 import About from "./About";
 import ProvidersPanel from "./ProvidersPanel";
@@ -13,8 +13,8 @@ import { setActiveSession } from "./agentStore";
 
 type View =
   | { kind: "session"; id: string }
-  | { kind: "settings" }
-  | { kind: "github" }
+  | { kind: "settings"; tab?: SettingsTab }
+  | { kind: "workspace" }
   | { kind: "skills" }
   | { kind: "about" }
   | { kind: "providers" }
@@ -46,7 +46,7 @@ export default function AppShell() {
         activeSessionId={view.kind === "session" ? view.id : null}
         onSelectSession={(id) => setView({ kind: "session", id })}
         onOpenSettings={() => setView({ kind: "settings" })}
-        onOpenGithub={() => setView({ kind: "github" })}
+        onOpenWorkspace={() => setView({ kind: "workspace" })}
         onOpenSkills={() => setView({ kind: "skills" })}
         onOpenAbout={() => setView({ kind: "about" })}
         onOpenProviders={() => setView({ kind: "providers" })}
@@ -59,8 +59,8 @@ export default function AppShell() {
       <div className="shell-content">
         <div className="view-transition" key={viewKey}>
           {view.kind === "session" && <SessionView sessionId={view.id} />}
-          {view.kind === "settings" && <Settings />}
-          {view.kind === "github" && <GithubPanel />}
+          {view.kind === "settings" && <Settings initialTab={view.tab} />}
+          {view.kind === "workspace" && <WorkspacePanel />}
           {view.kind === "skills" && <SkillsPanel />}
           {view.kind === "about" && <About />}
           {view.kind === "providers" && <ProvidersPanel />}

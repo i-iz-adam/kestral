@@ -69,7 +69,15 @@ export default function MessageContent({
         {images && images.length > 0 && (
           <div className="message-images-grid">
             {images.map((img, idx) => (
-              <img key={idx} src={img} alt={`attached-${idx}`} className="message-attached-image" />
+              <img
+                key={idx}
+                src={img}
+                alt={`attached-${idx}`}
+                className="message-attached-image"
+                onError={(e) => {
+                  (e.currentTarget as HTMLElement).style.display = "none";
+                }}
+              />
             ))}
           </div>
         )}

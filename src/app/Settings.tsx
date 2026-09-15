@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
-import { open as openDialog } from "@tauri-apps/api/dialog";
 import { open as openShell } from "@tauri-apps/api/shell";
-import type { OmniRouteConfigPayload, SessionDefaults, Workspace } from "../types";
+import type { OmniRouteConfigPayload, SessionDefaults } from "../types";
 import UpdaterModal from "./UpdaterModal";
 import CustomInstallerModal from "./CustomInstallerModal";
+import GithubPanel from "./GithubPanel";
+import WorkspacePanel from "./WorkspacePanel";
 
 export interface PythonStatusPayload {
   installed: boolean;
@@ -12,15 +13,28 @@ export interface PythonStatusPayload {
   binary?: string | null;
 }
 
-export default function Settings() {
+export type SettingsTab =
+  | "omniroute"
+  | "defaults"
+  | "github"
+  | "workspaces"
+  | "sandbox"
+  | "updates";
+
+interface SettingsProps {
+  initialTab?: SettingsTab;
+}
+
+export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const [searchQuery, setSearchQuery] = useState("");
+
   const [mode, setMode] = useState<"local" | "remote">("local");
   const [remoteUrl, setRemoteUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [status, setStatus] = useState<"idle" | "testing" | "ok" | "fail">(
-    "idle"
-  );
+  const [status, setStatus] = useState<"idle" | "testing" | "ok" | "fail">("idle");
   const [saved, setSaved] = useState(false);
+
   const [engineCommand, setEngineCommand] = useState("npx");
   const [engineArgs, setEngineArgs] = useState("-y omniroute");
   const [engineAutoStart, setEngineAutoStart] = useState(true);
@@ -38,23 +52,20 @@ export default function Settings() {
   const [installerOpen, setInstallerOpen] = useState(false);
 
   useEffect(() => {
-    invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then(
+    invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then((cfg) => {
+      if (cfg) {
+        setMode(cfg.mode);
+        setRemoteUrl(cfg.remote_url ?? "");
+        setApiKey(cfg.api_key ?? "");
+      }
+    });
+    invoke<{ command: string; args: string[]; auto_start: boolean }>("get_engine_config").then(
       (cfg) => {
-        if (cfg) {
-          setMode(cfg.mode);
-          setRemoteUrl(cfg.remote_url ?? "");
-          setApiKey(cfg.api_key ?? "");
-        }
+        setEngineCommand(cfg.command);
+        setEngineArgs(cfg.args.join(" "));
+        setEngineAutoStart(cfg.auto_start);
       }
     );
-    invoke<Workspace[]>("list_workspaces").then(setWorkspaces);
-    invoke<{ command: string; args: string[]; auto_start: boolean }>(
-      "get_engine_config"
-    ).then((cfg) => {
-      setEngineCommand(cfg.command);
-      setEngineArgs(cfg.args.join(" "));
-      setEngineAutoStart(cfg.auto_start);
-    });
     invoke<SessionDefaults>("get_session_defaults").then((defs) => {
       if (defs) {
         setDefaultPlanning(defs.planning_enabled ?? true);
@@ -102,23 +113,6 @@ export default function Settings() {
     setTimeout(() => setSaved(false), 1500);
   };
 
-  const addWorkspace = async () => {
-    const selected = await openDialog({ directory: true, multiple: false });
-    if (typeof selected !== "string") return;
-    const workspace = await invoke<Workspace>("add_workspace", {
-      name: null,
-      path: selected,
-    });
-    setWorkspaces((list) =>
-      list.some((w) => w.id === workspace.id) ? list : [...list, workspace]
-    );
-  };
-
-  const removeWorkspace = async (id: string) => {
-    await invoke("remove_workspace", { id });
-    setWorkspaces((list) => list.filter((w) => w.id !== id));
-  };
-
   const saveEngine = async () => {
     await invoke("save_engine_config", {
       command: engineCommand,
@@ -141,10 +135,28 @@ export default function Settings() {
     setTimeout(() => setDefaultsSaved(false), 1500);
   };
 
-  return (
-    <div className="settings-view">
-      <h2>Settings</h2>
+  const tabs = [
+    { id: "omniroute" as const, label: "OmniRoute & Engine", icon: "🔌", keywords: "omniroute connection engine process mode local remote api key command args" },
+    { id: "defaults" as const, label: "Session Defaults", icon: "⚙️", keywords: "session defaults planning mode sub-agents subagents graceful stop" },
+    { id: "github" as const, label: "GitHub Integration", icon: "🐙", keywords: "github token personal access token connect disconnect repo issues pull requests" },
+    { id: "workspaces" as const, label: "Workspaces", icon: "📁", keywords: "workspaces folder directory project active workspace path add folder" },
+    { id: "sandbox" as const, label: "Python Sandbox", icon: "🐍", keywords: "python sandbox execution environment run_python binary path" },
+    { id: "updates" as const, label: "Updates & System", icon: "🚀", keywords: "updates installer application version check for updates rerun installer" },
+  ];
 
+  const filteredTabs = useMemo(() => {
+    if (!searchQuery.trim()) return tabs;
+    const q = searchQuery.toLowerCase().trim();
+    return tabs.filter(
+      (t) =>
+        t.label.toLowerCase().includes(q) ||
+        t.keywords.toLowerCase().includes(q)
+    );
+  }, [searchQuery]);
+
+  const renderOmniRouteSection = () => (
+    <div className="settings-section-block">
+      <h2>OmniRoute & Engine</h2>
       <section>
         <h3>OmniRoute connection</h3>
         <div className="mode-toggle">
@@ -223,7 +235,12 @@ export default function Settings() {
           </button>
         </section>
       )}
+    </div>
+  );
 
+  const renderDefaultsSection = () => (
+    <div className="settings-section-block">
+      <h2>Session Defaults</h2>
       <section>
         <h3>Session defaults</h3>
         <p className="hint small">
@@ -263,9 +280,27 @@ export default function Settings() {
           {defaultsSaved ? "Saved" : "Save"}
         </button>
       </section>
+    </div>
+  );
 
+  const renderGithubSection = () => (
+    <div className="settings-section-block">
+      <h2>GitHub Integration</h2>
+      <GithubPanel />
+    </div>
+  );
+
+  const renderWorkspacesSection = () => (
+    <div className="settings-section-block">
+      <WorkspacePanel />
+    </div>
+  );
+
+  const renderSandboxSection = () => (
+    <div className="settings-section-block">
+      <h2>Python Execution Sandbox</h2>
       <section>
-        <h3>Python Execution Sandbox</h3>
+        <h3>Python Status</h3>
         <p className="hint small">
           Status of Python installation for the <code>run_python</code> execution tool.
         </p>
@@ -295,9 +330,14 @@ export default function Settings() {
           )}
         </div>
       </section>
+    </div>
+  );
 
+  const renderUpdatesSection = () => (
+    <div className="settings-section-block">
+      <h2>Application Updates & Installer</h2>
       <section>
-        <h3>Application Updates & Installer</h3>
+        <h3>Software Updates</h3>
         <p className="hint small">
           Check for software updates or rerun the custom installation setup.
         </p>
@@ -310,34 +350,88 @@ export default function Settings() {
           </button>
         </div>
       </section>
+    </div>
+  );
 
-      <section>
-        <h3>Workspaces</h3>
-        <p className="hint small">
-          Folders the agent can work from. Each session picks one when it's
-          created and can switch later — add as many projects here as you
-          like.
-        </p>
-        <div className="workspace-list">
-          {workspaces.map((w) => (
-            <div className="workspace-list-item" key={w.id}>
-              <div>
-                <span className="workspace-list-name">{w.name}</span>
-                <span className="hint small">{w.path}</span>
-              </div>
-              <button onClick={() => removeWorkspace(w.id)} title="Remove">
-                Remove
-              </button>
-            </div>
-          ))}
-          {workspaces.length === 0 && (
-            <p className="hint small">No workspaces yet.</p>
+  const renderContentForTab = (tabId: SettingsTab) => {
+    switch (tabId) {
+      case "omniroute":
+        return renderOmniRouteSection();
+      case "defaults":
+        return renderDefaultsSection();
+      case "github":
+        return renderGithubSection();
+      case "workspaces":
+        return renderWorkspacesSection();
+      case "sandbox":
+        return renderSandboxSection();
+      case "updates":
+        return renderUpdatesSection();
+    }
+  };
+
+  return (
+    <div className="settings-layout">
+      <div className="settings-header">
+        <div className="settings-search-bar">
+          <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search settings..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button className="search-clear-btn" onClick={() => setSearchQuery("")}>
+              ✕
+            </button>
           )}
         </div>
-        <button onClick={addWorkspace} style={{ marginTop: 10 }}>
-          Add folder
-        </button>
-      </section>
+      </div>
+
+      <div className="settings-body">
+        <div className="settings-nav">
+          {tabs.map((tab) => {
+            const isVisible = filteredTabs.some((t) => t.id === tab.id);
+            if (!isVisible && searchQuery.trim()) return null;
+            return (
+              <button
+                key={tab.id}
+                className={`settings-nav-item ${activeTab === tab.id && !searchQuery.trim() ? "active" : ""}`}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (searchQuery) setSearchQuery("");
+                }}
+              >
+                <span className="settings-nav-icon">{tab.icon}</span>
+                <span className="settings-nav-label">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="settings-content">
+          {searchQuery.trim() ? (
+            filteredTabs.length > 0 ? (
+              filteredTabs.map((tab) => (
+                <div key={tab.id} className="search-result-group">
+                  <div className="search-result-category-badge">{tab.label}</div>
+                  {renderContentForTab(tab.id)}
+                </div>
+              ))
+            ) : (
+              <div className="settings-no-results">
+                <p className="hint">No settings found matching "{searchQuery}"</p>
+              </div>
+            )
+          ) : (
+            renderContentForTab(activeTab)
+          )}
+        </div>
+      </div>
 
       <UpdaterModal isOpen={updaterOpen} onClose={() => setUpdaterOpen(false)} />
       <CustomInstallerModal isOpen={installerOpen} onClose={() => setInstallerOpen(false)} />

@@ -1556,6 +1556,13 @@ button:not(:disabled):hover {
   object-fit: contain;
 }
 
+/* Hide broken/empty images and empty paragraphs */
+.markdown img:not([src]),
+.markdown img[src=""],
+.markdown p:empty {
+  display: none !important;
+}
+
 .composer-hint {
   margin-top: 8px;
   padding: 8px 10px;

@@ -1069,6 +1069,17 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
     let script_path = working_dir.join("script.py");
     fs::write(&script_path, code).map_err(|e| format!("failed to write python script: {}", e))?;
 
+    // Snapshot pre-existing files in working_dir so we only report newly created image artifacts
+    let mut initial_files = std::collections::HashSet::new();
+    if let Ok(entries) = fs::read_dir(working_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                initial_files.insert(path);
+            }
+        }
+    }
+
     let check_version = |bin: &str| -> bool {
         let mut cmd = Command::new(bin);
         cmd.arg("--version");
@@ -1129,11 +1140,15 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
                 if let Ok(entries) = fs::read_dir(working_dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
-                        if path.is_file() {
-                            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                                if matches!(ext.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp" | "svg") {
-                                    if path.file_name().and_then(|n| n.to_str()) != Some("script.py") {
-                                        generated_artifacts.push(path.to_string_lossy().to_string());
+                        if path.is_file() && !initial_files.contains(&path) {
+                            if let Ok(meta) = path.metadata() {
+                                if meta.len() > 0 {
+                                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                                        if matches!(ext.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp" | "svg") {
+                                            if path.file_name().and_then(|n| n.to_str()) != Some("script.py") {
+                                                generated_artifacts.push(path.to_string_lossy().to_string());
+                                            }
+                                        }
                                     }
                                 }
                             }
