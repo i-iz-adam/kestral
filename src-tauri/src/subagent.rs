@@ -77,7 +77,7 @@ pub(crate) async fn run(
     for skill in subagent_matched {
         if subagent_loaded_skills.insert(skill.id.clone()) {
             if let Some(content) = skills::get_content(app_handle, &skill.id, workspace) {
-                agent::emit_skill_loaded(app_handle, &session.id, &skill);
+                agent::emit_skill_loaded(app_handle, &session.id, &skill, Some(parent_call_id));
                 messages.push(ChatMessage {
                     role: "system".into(),
                     content: Some(format!("Relevant skill — {}:\n\n{}", skill.name, content)),
@@ -173,6 +173,23 @@ pub(crate) async fn run(
             Err(e) => return Err(e),
         };
         messages.push(assistant_msg.clone());
+
+        if let Some(ref content) = assistant_msg.content {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                let thought_id = format!("thought-{}", uuid::Uuid::new_v4());
+                agent::emit_tool_event(
+                    app_handle,
+                    &session.id,
+                    &thought_id,
+                    "__subagent_thought__",
+                    "done",
+                    None,
+                    Some(trimmed.to_string()),
+                    Some(parent_call_id),
+                );
+            }
+        }
 
         let tool_calls = assistant_msg.tool_calls.clone().unwrap_or_default();
         if tool_calls.is_empty() {

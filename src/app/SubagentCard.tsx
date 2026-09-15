@@ -1,37 +1,12 @@
-import { useEffect, useState } from "react";
 import type { ToolCallEventPayload } from "../types";
-import GithubToolCard from "./GithubToolCard";
-import ToolCallRow from "./ToolCallRow";
 
 interface Props {
-  event: ToolCallEventPayload; // the delegate_to_subagent call itself
-  calls: ToolCallEventPayload[]; // its nested tool calls, arrival order
-  workspace: string;
-  onPromptFix: (text: string) => void;
-  onApprove: (callId: string, approved: boolean) => void;
+  event: ToolCallEventPayload;
+  calls: ToolCallEventPayload[];
+  onOpen: () => void;
 }
 
-export default function SubagentCard({
-  event,
-  calls,
-  workspace,
-  onPromptFix,
-  onApprove,
-}: Props) {
-  const [expanded, setExpanded] = useState(true);
-  const [autoCollapsed, setAutoCollapsed] = useState(false);
-
-  // Watch it work while it's running, then get out of the way once it's
-  // done — the summary line still shows, the step-by-step detail doesn't
-  // have to stay open to read it. Only auto-collapses once, so it doesn't
-  // fight a manual toggle.
-  useEffect(() => {
-    if (event.status === "done" && !autoCollapsed) {
-      setExpanded(false);
-      setAutoCollapsed(true);
-    }
-  }, [event.status, autoCollapsed]);
-
+export default function SubagentCard({ event, calls, onOpen }: Props) {
   const task = (() => {
     const args = event.args as { task?: string } | undefined;
     return args?.task ?? "subagent task";
@@ -46,45 +21,84 @@ export default function SubagentCard({
       ? "awaiting"
       : "running";
 
+  const skillCount = calls.filter((c) => c.name === "__skill_loaded__").length;
+  const stepCount = calls.filter(
+    (c) => c.name !== "__skill_loaded__" && c.name !== "__subagent_thought__"
+  ).length;
+
   return (
-    <div className={"subagent-card " + stateClass + (expanded ? " expanded" : "")}>
-      <div className="subagent-header" onClick={() => setExpanded((e) => !e)}>
-        <span className="subagent-dot" />
-        <span className="subagent-task">{task}</span>
-        <span className="subagent-meta">
-          {calls.length > 0
-            ? `${calls.length} step${calls.length === 1 ? "" : "s"}`
-            : ""}
-        </span>
-        <span className="subagent-chevron">▸</span>
+    <div
+      className={`subagent-card-animated ${stateClass}`}
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      <div className="subagent-card-glow-bg" />
+      <div className="subagent-card-border-glow" />
+
+      <div className="subagent-card-header">
+        <div className="subagent-card-icon-wrapper">
+          <span className="subagent-animated-orb" />
+          <span className="subagent-icon font-mono">🤖</span>
+        </div>
+
+        <div className="subagent-card-title-block">
+          <div className="subagent-card-label font-mono">SUB-AGENT DELEGATION</div>
+          <div className="subagent-card-task">{task}</div>
+        </div>
+
+        <div className={`subagent-card-status-badge ${stateClass}`}>
+          <span className="status-badge-dot" />
+          <span className="status-badge-text font-mono">
+            {event.status === "done"
+              ? "Completed"
+              : event.status === "error"
+              ? "Failed"
+              : event.status === "awaiting-approval"
+              ? "Awaiting"
+              : "Active"}
+          </span>
+        </div>
       </div>
 
-      {expanded && (
-        <div className="subagent-body">
-          {calls.length === 0 && (
-            <p className="subagent-empty">Starting up...</p>
-          )}
-          {calls.map((c) =>
-            c.name.startsWith("github_") ? (
-              <GithubToolCard
-                key={c.call_id}
-                event={c}
-                workspace={workspace}
-                onPromptFix={onPromptFix}
-              />
-            ) : (
-              <ToolCallRow key={c.call_id} event={c} onApprove={onApprove} />
-            )
-          )}
+      <div className="subagent-card-metrics font-mono">
+        {stepCount > 0 && (
+          <span className="metric-tag">
+            ⚡ {stepCount} step{stepCount === 1 ? "" : "s"}
+          </span>
+        )}
+        {skillCount > 0 && (
+          <span className="metric-tag">
+            🧠 {skillCount} skill{skillCount === 1 ? "" : "s"} loaded
+          </span>
+        )}
+        {stepCount === 0 && skillCount === 0 && event.status !== "done" && (
+          <span className="metric-tag pulsing">Initializing...</span>
+        )}
+      </div>
+
+      {event.status === "done" && event.result && (
+        <div className="subagent-card-summary-preview">
+          <span className="summary-quote">"{event.result}"</span>
         </div>
       )}
 
-      {event.status === "done" && event.result && (
-        <div className="subagent-summary">{event.result}</div>
-      )}
       {event.status === "error" && event.result && (
-        <div className="subagent-summary fail">{event.result}</div>
+        <div className="subagent-card-summary-preview error">
+          <span>{event.result}</span>
+        </div>
       )}
+
+      <div className="subagent-card-action-bar">
+        <span className="action-text font-mono">Click to view sub-agent chat</span>
+        <span className="action-arrow">→</span>
+      </div>
     </div>
   );
 }

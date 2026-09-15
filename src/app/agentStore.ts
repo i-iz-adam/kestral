@@ -29,6 +29,8 @@ export interface SessionRecord {
    * sole source of truth again. */
   timeline: TimelineItem[];
   liveCalls: ToolCallEventPayload[];
+  /** Sub-agent calls grouped by parent_call_id, persisted in memory across turn ends */
+  subagentCalls: Record<string, ToolCallEventPayload[]>;
   sending: boolean;
   /** True once a turn finishes for this session while it wasn't the one
    * on screen — cleared by setActiveSession the moment the person opens
@@ -39,7 +41,7 @@ export interface SessionRecord {
 }
 
 function emptyRecord(): SessionRecord {
-  return { session: null, timeline: [], liveCalls: [], sending: false, unseenActivity: false };
+  return { session: null, timeline: [], liveCalls: [], subagentCalls: {}, sending: false, unseenActivity: false };
 }
 
 // Stable snapshot for unknown sessions. useSyncExternalStore requires
@@ -220,7 +222,18 @@ export function ensureAgentEventsStarted() {
     ) {
       timeline = [...timeline, { kind: "tool", key: nextKey("tool"), callId: evt.payload.call_id }];
     }
-    patch(session_id, { liveCalls, timeline });
+    const parentId = evt.payload.parent_call_id;
+    let subagentCalls = rec.subagentCalls ?? {};
+    if (parentId) {
+      const existing = subagentCalls[parentId] ?? [];
+      const cIdx = existing.findIndex((c) => c.call_id === evt.payload.call_id);
+      const updatedList =
+        cIdx === -1
+          ? [...existing, evt.payload]
+          : existing.map((c, i) => (i === cIdx ? evt.payload : c));
+      subagentCalls = { ...subagentCalls, [parentId]: updatedList };
+    }
+    patch(session_id, { liveCalls, timeline, subagentCalls });
   });
 
   listen<MessageStartEventPayload>("agent://message-start", (evt) => {
@@ -329,6 +342,7 @@ export function ensureAgentEventsStarted() {
       session: session ?? rec.session,
       timeline,
       liveCalls: [],
+      subagentCalls: rec.subagentCalls ?? {},
       sending: false,
       unseenActivity: session_id !== activeSessionId,
     });
