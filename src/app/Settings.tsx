@@ -2,11 +2,9 @@ import { useEffect, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/tauri";
 import { open as openShell } from "@tauri-apps/api/shell";
 import type { OmniRouteConfigPayload, SessionDefaults } from "../types";
-import UpdaterModal from "./UpdaterModal";
-import CustomInstallerModal from "./CustomInstallerModal";
 import GithubPanel from "./GithubPanel";
 import WorkspacePanel from "./WorkspacePanel";
-import { useUpdaterStore } from "./updaterStore";
+import UpdatesSection from "./UpdatesSection";
 
 export interface PythonStatusPayload {
   installed: boolean;
@@ -48,10 +46,6 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
 
   const [pythonStatus, setPythonStatus] = useState<PythonStatusPayload | null>(null);
   const [checkingPython, setCheckingPython] = useState(false);
-
-  const [updaterOpen, setUpdaterOpen] = useState(false);
-  const [installerOpen, setInstallerOpen] = useState(false);
-  const { result: updateResult } = useUpdaterStore();
 
   useEffect(() => {
     invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then((cfg) => {
@@ -336,28 +330,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   );
 
   const renderUpdatesSection = () => (
-    <div className="settings-section-block">
-      <h2>Application Updates & Installer</h2>
-      <section>
-        <h3>Software Updates</h3>
-        <p className="hint small">
-          Check for software updates or rerun the custom installation setup.
-          {updateResult?.has_update && (
-            <span style={{ display: "block", marginTop: 6, color: "#50fa7b", fontWeight: 500 }}>
-              Update Available: v{updateResult.current_version} &rarr; v{updateResult.latest_version}
-            </span>
-          )}
-        </p>
-        <div className="row" style={{ marginTop: 10 }}>
-          <button className="primary" onClick={() => setUpdaterOpen(true)}>
-            Check for Updates
-          </button>
-          <button onClick={() => setInstallerOpen(true)}>
-            Launch Installer
-          </button>
-        </div>
-      </section>
-    </div>
+    <UpdatesSection />
   );
 
   const renderContentForTab = (tabId: SettingsTab) => {
@@ -439,9 +412,6 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
           )}
         </div>
       </div>
-
-      <UpdaterModal isOpen={updaterOpen} onClose={() => setUpdaterOpen(false)} />
-      <CustomInstallerModal isOpen={installerOpen} onClose={() => setInstallerOpen(false)} />
     </div>
   );
 }
