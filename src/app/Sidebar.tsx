@@ -536,7 +536,6 @@ function SessionItemRow({
         {!sending && unseenActivity && (
           <span className="session-ready-dot" title="Finished while you were away" />
         )}
-        <span className="session-mode">{session.mode}</span>
         <button
           className="session-action-btn"
           onClick={(e) => {
