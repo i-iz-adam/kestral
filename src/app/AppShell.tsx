@@ -61,8 +61,12 @@ export default function AppShell() {
           {view.kind === "about" && <About />}
           {view.kind === "providers" && <ProvidersPanel />}
           {view.kind === "empty" && (
-            <div className="empty-state">
+            <div className="empty-state" style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: -1, opacity: 0.5 }}>
+                <AmbientMotes count={24} />
+              </div>
               <p>Pick a session on the left, or start a new one.</p>
+              <button className="primary" style={{ marginTop: "16px", zIndex: 1 }} onClick={() => document.querySelector<HTMLButtonElement>(".sidebar > button.primary")?.click()}>New Session</button>
             </div>
           )}
         </div>

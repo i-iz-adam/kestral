@@ -290,9 +290,9 @@ function SessionListItem({
     >
       <span className="session-title">{session.title}</span>
       <span className="session-item-right">
-        {sending && <span className="session-working-dot" title="Working..." />}
+        {sending && <span className="life-orb active" title="Working..." />}
         {!sending && unseenActivity && (
-          <span className="session-ready-dot" title="Finished while you were away" />
+          <span className="life-orb" title="Finished while you were away" style={{opacity: 0.6}} />
         )}
         <span className="session-mode">{session.mode}</span>
       </span>

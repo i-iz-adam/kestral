@@ -71,7 +71,7 @@ export default function DiffToolCard({
 
   return (
     <>
-      <div className={"tool-row diff-row " + event.status}>
+      <div className={"tool-row diff-row " + event.status} data-tool={event.name}>
         <span className="tool-name">{event.name}</span>
         <span className="tool-arg">{diff.label}</span>
         {(added > 0 || removed > 0) && (
