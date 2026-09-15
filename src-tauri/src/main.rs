@@ -231,6 +231,24 @@ fn set_session_sandbox_network(
 }
 
 #[tauri::command]
+fn set_session_pinned(
+    app_handle: tauri::AppHandle,
+    id: String,
+    pinned: bool,
+) -> Result<(), String> {
+    sessions::set_pinned(&app_handle, &id, pinned)
+}
+
+#[tauri::command]
+fn set_session_archived(
+    app_handle: tauri::AppHandle,
+    id: String,
+    archived: bool,
+) -> Result<(), String> {
+    sessions::set_archived(&app_handle, &id, archived)
+}
+
+#[tauri::command]
 fn approve_all_pending(
     approvals: tauri::State<'_, agent::PendingApprovals>,
     session_id: String,
