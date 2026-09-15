@@ -20,12 +20,13 @@ import {
   pushSystemNote as storePushSystemNote,
 } from "./agentStore";
 import { useAgentSession } from "./useAgentSession";
+import PlanDrawer from "./PlanDrawer";
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
   // Live turn state (timeline/liveCalls/sending) and the persisted session
   // record both come from a global store that keeps running regardless of
   // whether this component is mounted — see agentStore.ts.
-  const { session, timeline, liveCalls, subagentCalls, sending } = useAgentSession(sessionId);
+  const { session, timeline, liveCalls, subagentCalls, plan, sending } = useAgentSession(sessionId);
   const [input, setInput] = useState("");
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -341,13 +342,15 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           onBack={() => setActiveSubagentId(null)}
           onPromptFix={promptFix}
           onApprove={approve}
+          plan={plan}
         />
       );
     }
   }
 
   return (
-    <div className="session-view">
+    <div className="session-view" style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {plan && plan.length > 0 && <PlanDrawer plan={plan} />}
       <div className="session-header">
         <span
           className={"life-orb" + (sending ? " active" : "")}

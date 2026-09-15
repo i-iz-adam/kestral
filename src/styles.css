@@ -4997,3 +4997,344 @@ button.github-card:hover {
   align-items: center;
   gap: 8px;
 }
+
+
+/* ==========================================================================
+   GRIMOIRE PLAN DRAWER (TASK CHECKLIST SCROLL)
+   ========================================================================== */
+
+@keyframes grimoire-pulse-gold {
+  0%, 100% {
+    box-shadow: 0 0 12px var(--gold-glow), -2px 0 16px rgba(224, 180, 92, 0.4);
+    border-color: rgba(224, 180, 92, 0.9);
+  }
+  50% {
+    box-shadow: 0 0 24px var(--gold-glow), -4px 0 26px rgba(224, 180, 92, 0.8);
+    border-color: #ffe082;
+  }
+}
+
+@keyframes step-pulse-aura {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(155, 107, 255, 0.25), inset 0 0 8px rgba(155, 107, 255, 0.15);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(155, 107, 255, 0.5), inset 0 0 14px rgba(155, 107, 255, 0.3);
+  }
+}
+
+.grimoire-drawer-container {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  pointer-events: none;
+  display: flex;
+  align-items: stretch;
+}
+
+.grimoire-drawer-container * {
+  pointer-events: auto;
+}
+
+/* Gilded Bookmark / Pull-Out Tab */
+.grimoire-toggle-tab {
+  position: absolute;
+  top: 80px;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, rgba(32, 25, 48, 0.96) 0%, rgba(20, 15, 34, 0.98) 100%);
+  border: 1px solid rgba(224, 180, 92, 0.45);
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  padding: 8px 12px 8px 10px;
+  color: var(--gold);
+  cursor: pointer;
+  z-index: 105;
+  box-shadow: -4px 4px 18px rgba(0, 0, 0, 0.4), inset 1px 1px 0 rgba(255, 255, 255, 0.12);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.grimoire-toggle-tab:hover {
+  transform: translateX(-4px);
+  background: linear-gradient(135deg, rgba(42, 32, 64, 0.98) 0%, rgba(26, 20, 44, 1) 100%);
+  border-color: rgba(224, 180, 92, 0.75);
+  box-shadow: -6px 6px 24px rgba(0, 0, 0, 0.5), 0 0 16px var(--gold-glow);
+}
+
+.grimoire-drawer-container.open .grimoire-toggle-tab {
+  transform: translateX(-340px);
+  border-radius: 12px 0 0 12px;
+}
+
+.grimoire-toggle-tab.pulse-gold {
+  animation: grimoire-pulse-gold 1.8s infinite ease-in-out;
+}
+
+.grimoire-tab-spine {
+  width: 3px;
+  height: 20px;
+  background: linear-gradient(180deg, var(--gold) 0%, #d49f33 100%);
+  border-radius: 2px;
+  box-shadow: 0 0 8px var(--gold-glow);
+}
+
+.grimoire-tab-icon {
+  font-size: 16px;
+}
+
+.grimoire-tab-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  background: rgba(155, 107, 255, 0.25);
+  border: 1px solid rgba(155, 107, 255, 0.4);
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+.grimoire-active-spark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  animation: pulse-dot 1.2s infinite ease-in-out;
+}
+
+/* Slide-Out Parchment Drawer Panel */
+.grimoire-drawer-panel {
+  width: 340px;
+  height: 100%;
+  background: linear-gradient(180deg, rgba(22, 17, 34, 0.96) 0%, rgba(15, 12, 24, 0.98) 100%);
+  border-left: 1px solid rgba(224, 180, 92, 0.35);
+  backdrop-filter: blur(16px);
+  box-shadow: -10px 0 36px rgba(0, 0, 0, 0.6), 0 0 20px rgba(155, 107, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 101;
+}
+
+.grimoire-drawer-container.open .grimoire-drawer-panel {
+  transform: translateX(0);
+}
+
+/* Header & Progress Bar */
+.grimoire-header {
+  padding: 20px 22px 16px 22px;
+  background: rgba(16, 12, 26, 0.8);
+  border-bottom: 1px solid rgba(224, 180, 92, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.grimoire-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.grimoire-title-block {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.grimoire-sigil {
+  font-size: 24px;
+}
+
+.grimoire-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.02em;
+  margin: 0;
+  text-shadow: 0 0 10px rgba(224, 180, 92, 0.3);
+}
+
+.grimoire-subtitle {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+}
+
+.grimoire-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.15s var(--ease-spring);
+}
+
+.grimoire-close-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(1.15);
+}
+
+.grimoire-progress-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.grimoire-progress-track {
+  flex: 1;
+  height: 7px;
+  background: rgba(30, 24, 48, 0.8);
+  border: 1px solid rgba(155, 107, 255, 0.25);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.grimoire-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #d49f33 0%, var(--gold) 60%, #ffe082 100%);
+  border-radius: 10px;
+  box-shadow: 0 0 12px var(--gold-glow);
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.grimoire-progress-percent {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold);
+  min-width: 32px;
+  text-align: right;
+}
+
+/* Grimoire Step Cards */
+.grimoire-body {
+  flex: 1;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+
+.grimoire-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.grimoire-step-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(26, 21, 42, 0.6);
+  border: 1px solid rgba(155, 107, 255, 0.18);
+  border-radius: 10px;
+  transition: all 0.25s var(--ease);
+}
+
+.grimoire-step-card:hover {
+  background: rgba(34, 27, 54, 0.85);
+  border-color: rgba(183, 148, 255, 0.35);
+  transform: translateX(-2px);
+}
+
+.grimoire-step-card.completed {
+  background: rgba(224, 180, 92, 0.06);
+  border-color: rgba(224, 180, 92, 0.25);
+  opacity: 0.85;
+}
+
+.grimoire-step-card.completed:hover {
+  opacity: 1;
+  border-color: rgba(224, 180, 92, 0.45);
+}
+
+.grimoire-step-card.in-progress {
+  background: linear-gradient(135deg, rgba(38, 28, 62, 0.9) 0%, rgba(28, 21, 48, 0.95) 100%);
+  border-color: rgba(155, 107, 255, 0.6);
+  animation: step-pulse-aura 2.2s infinite ease-in-out;
+}
+
+.grimoire-step-status-icon {
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.step-icon-done {
+  color: var(--gold);
+  filter: drop-shadow(0 0 6px var(--gold-glow));
+}
+
+.step-icon-progress {
+  color: #a879ff;
+  animation: pulse-dot 1.2s infinite ease-in-out;
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+
+.step-icon-pending {
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+.grimoire-step-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.grimoire-step-number {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.grimoire-step-card.completed .grimoire-step-number {
+  color: rgba(224, 180, 92, 0.7);
+}
+
+.grimoire-step-card.in-progress .grimoire-step-number {
+  color: var(--accent-soft);
+}
+
+.grimoire-step-text {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  margin: 0;
+}
+
+.grimoire-step-card.completed .grimoire-step-text {
+  text-decoration: line-through;
+  color: rgba(224, 180, 92, 0.85);
+}
+
+.grimoire-step-card.in-progress .grimoire-step-text {
+  color: #ffffff;
+  font-weight: 500;
+}
+
+/* Footer */
+.grimoire-footer {
+  padding: 14px 20px;
+  background: rgba(16, 12, 26, 0.85);
+  border-top: 1px solid rgba(224, 180, 92, 0.15);
+  font-size: 10px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
