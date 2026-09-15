@@ -192,7 +192,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
           <button onClick={test}>Test connection</button>
           {status === "ok" && <span className="ok">Connected</span>}
           {status === "fail" && <span className="fail">Couldn't connect</span>}
-          <button className="primary" onClick={save}>
+          <button className={`primary ${saved ? "saved" : ""}`} onClick={save}>
             {saved ? "Saved" : "Save"}
           </button>
         </div>
@@ -227,7 +227,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
             Start automatically when the app opens
           </label>
           <button
-            className="primary"
+            className={`primary ${engineSaved ? "saved" : ""}`}
             onClick={saveEngine}
             style={{ marginTop: 10 }}
           >
@@ -273,7 +273,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
           </label>
         </div>
         <button
-          className="primary"
+          className={`primary ${defaultsSaved ? "saved" : ""}`}
           onClick={saveDefaults}
           style={{ marginTop: 10 }}
         >
