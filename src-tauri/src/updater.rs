@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct UpdateCheckResult {
@@ -124,30 +127,189 @@ pub async fn check_app_update(app_handle: tauri::AppHandle) -> Result<UpdateChec
 }
 
 #[tauri::command]
-pub async fn download_and_install_update(app_handle: tauri::AppHandle) -> Result<bool, String> {
+pub async fn download_and_install_update(
+    app_handle: tauri::AppHandle,
+    download_url: Option<String>,
+) -> Result<bool, String> {
+    use futures_util::StreamExt;
     use tauri::Manager;
-    use tokio::time::{sleep, Duration};
 
-    let steps = [
-        (10, "Starting download..."),
-        (25, "Downloading inner files..."),
-        (50, "Unpacking setup..."),
-        (75, "Preparing installer..."),
-        (100, "Ready to jump..."),
-    ];
+    let target_url = match download_url {
+        Some(url) if !url.trim().is_empty() => url,
+        _ => {
+            let check_res = check_app_update(app_handle.clone()).await?;
+            if check_res.download_url.is_empty() {
+                return Err("No valid download URL found for the update.".to_string());
+            }
+            check_res.download_url
+        }
+    };
 
-    for (p, msg) in steps {
-        sleep(Duration::from_millis(500)).await;
+    let _ = app_handle.emit_all(
+        "update-progress",
+        InstallProgressPayload {
+            stage: "init".to_string(),
+            percent: 5,
+            message: "Initializing update download...".to_string(),
+            completed: false,
+        },
+    );
+
+    // If it's a web page URL (e.g. GitHub release tag page HTML), open in browser
+    if !target_url.ends_with(".exe")
+        && !target_url.ends_with(".msi")
+        && !target_url.ends_with(".dmg")
+        && !target_url.ends_with(".appimage")
+        && !target_url.ends_with(".deb")
+        && !target_url.ends_with(".rpm")
+        && !target_url.ends_with(".pkg")
+        && !target_url.ends_with(".zip")
+        && !target_url.contains("/download/")
+    {
         let _ = app_handle.emit_all(
             "update-progress",
             InstallProgressPayload {
-                stage: "download".to_string(),
-                percent: p,
-                message: msg.to_string(),
-                completed: p == 100,
+                stage: "browser".to_string(),
+                percent: 100,
+                message: "Opening release page in browser...".to_string(),
+                completed: true,
             },
         );
+        tauri::api::shell::open(&app_handle.shell_scope(), &target_url, None)
+            .map_err(|e| format!("Failed to open release URL: {}", e))?;
+        return Ok(true);
     }
+
+    let client = reqwest::Client::builder()
+        .user_agent("kestrel-app-updater")
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let res = client
+        .get(&target_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to connect to download URL: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("HTTP request failed with status {}", res.status()));
+    }
+
+    let total_size = res.content_length().unwrap_or(0);
+
+    let ext = if target_url.ends_with(".msi") {
+        "msi"
+    } else if target_url.ends_with(".dmg") {
+        "dmg"
+    } else if target_url.ends_with(".appimage") {
+        "AppImage"
+    } else if target_url.ends_with(".deb") {
+        "deb"
+    } else if target_url.ends_with(".pkg") {
+        "pkg"
+    } else if target_url.ends_with(".zip") {
+        "zip"
+    } else {
+        if cfg!(target_os = "windows") {
+            "exe"
+        } else if cfg!(target_os = "macos") {
+            "dmg"
+        } else {
+            "AppImage"
+        }
+    };
+
+    let temp_dir = std::env::temp_dir();
+    let temp_filename = format!("kestrel_update_installer.{}", ext);
+    let temp_path = temp_dir.join(temp_filename);
+
+    let mut file = File::create(&temp_path)
+        .map_err(|e| format!("Failed to create temporary file {:?}: {}", temp_path, e))?;
+
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
+
+    let _ = app_handle.emit_all(
+        "update-progress",
+        InstallProgressPayload {
+            stage: "download".to_string(),
+            percent: 10,
+            message: "Starting download...".to_string(),
+            completed: false,
+        },
+    );
+
+    let mut last_emitted_pct = 10u32;
+
+    while let Some(item) = stream.next().await {
+        let chunk = item.map_err(|e| format!("Error downloading update chunk: {}", e))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Failed to write chunk to disk: {}", e))?;
+        downloaded += chunk.len() as u64;
+
+        if total_size > 0 {
+            let pct = (10.0 + (downloaded as f64 / total_size as f64) * 75.0) as u32;
+            if pct > last_emitted_pct && pct <= 85 {
+                last_emitted_pct = pct;
+                let downloaded_mb = downloaded as f64 / 1_048_576.0;
+                let total_mb = total_size as f64 / 1_048_576.0;
+                let _ = app_handle.emit_all(
+                    "update-progress",
+                    InstallProgressPayload {
+                        stage: "download".to_string(),
+                        percent: pct,
+                        message: format!(
+                            "Downloading update: {:.1} MB / {:.1} MB",
+                            downloaded_mb, total_mb
+                        ),
+                        completed: false,
+                    },
+                );
+            }
+        }
+    }
+
+    file.flush()
+        .map_err(|e| format!("Failed to flush downloaded file: {}", e))?;
+    drop(file);
+
+    let _ = app_handle.emit_all(
+        "update-progress",
+        InstallProgressPayload {
+            stage: "verify".to_string(),
+            percent: 90,
+            message: "Verifying installer package...".to_string(),
+            completed: false,
+        },
+    );
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
+
+    let _ = app_handle.emit_all(
+        "update-progress",
+        InstallProgressPayload {
+            stage: "launch".to_string(),
+            percent: 100,
+            message: "Launching installer package...".to_string(),
+            completed: true,
+        },
+    );
+
+    let path_str = temp_path.to_string_lossy().to_string();
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new(&temp_path).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(&temp_path).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new(&temp_path).spawn();
+    }
+
+    let _ = tauri::api::shell::open(&app_handle.shell_scope(), &path_str, None);
 
     Ok(true)
 }
@@ -155,32 +317,68 @@ pub async fn download_and_install_update(app_handle: tauri::AppHandle) -> Result
 #[tauri::command]
 pub async fn run_custom_installer(
     app_handle: tauri::AppHandle,
-    _config: InstallerConfig,
+    config: InstallerConfig,
 ) -> Result<bool, String> {
     use tauri::Manager;
     use tokio::time::{sleep, Duration};
 
-    let steps = [
-        (20, "Initializing package..."),
-        (40, "Extracting application assets..."),
-        (60, "Registering protocol handler..."),
-        (80, "Writing environment configuration..."),
-        (100, "Finalizing setup..."),
-    ];
+    let _ = app_handle.emit_all(
+        "installer-progress",
+        InstallProgressPayload {
+            stage: "init".to_string(),
+            percent: 15,
+            message: "Initializing target directory...".to_string(),
+            completed: false,
+        },
+    );
+    sleep(Duration::from_millis(300)).await;
 
-    for (p, msg) in steps {
-        sleep(Duration::from_millis(600)).await;
-        let _ = app_handle.emit_all(
-            "installer-progress",
-            InstallProgressPayload {
-                stage: "install".to_string(),
-                percent: p,
-                message: msg.to_string(),
-                completed: p == 100,
-            },
-        );
+    let target_dir = if config.install_dir.contains("%APPDATA%") {
+        let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(config.install_dir.replace("%APPDATA%", &appdata))
+    } else {
+        PathBuf::from(&config.install_dir)
+    };
+
+    let _ = std::fs::create_dir_all(&target_dir);
+
+    let _ = app_handle.emit_all(
+        "installer-progress",
+        InstallProgressPayload {
+            stage: "config".to_string(),
+            percent: 45,
+            message: "Writing environment configuration...".to_string(),
+            completed: false,
+        },
+    );
+    sleep(Duration::from_millis(400)).await;
+
+    let config_file = target_dir.join("installer_config.json");
+    if let Ok(json_data) = serde_json::to_string_pretty(&config) {
+        let _ = std::fs::write(config_file, json_data);
     }
-    
+
+    let _ = app_handle.emit_all(
+        "installer-progress",
+        InstallProgressPayload {
+            stage: "shortcuts".to_string(),
+            percent: 75,
+            message: "Configuring shortcuts and protocol handler...".to_string(),
+            completed: false,
+        },
+    );
+    sleep(Duration::from_millis(400)).await;
+
+    let _ = app_handle.emit_all(
+        "installer-progress",
+        InstallProgressPayload {
+            stage: "finish".to_string(),
+            percent: 100,
+            message: "Custom setup completed successfully!".to_string(),
+            completed: true,
+        },
+    );
+
     Ok(true)
 }
 

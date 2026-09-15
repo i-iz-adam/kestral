@@ -51,7 +51,7 @@ export default function UpdaterModal({ isOpen, onClose }: UpdaterModalProps) {
     setInstalling(true);
     setProgress({ stage: "init", percent: 0, message: "Initializing...", completed: false });
     try {
-      await invoke("download_and_install_update");
+      await invoke("download_and_install_update", { downloadUrl: updateResult?.download_url });
     } catch (err) {
       console.error(err);
       setInstalling(false);

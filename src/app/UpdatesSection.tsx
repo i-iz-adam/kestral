@@ -30,7 +30,6 @@ export default function UpdatesSection() {
     let unlistenUpdate: UnlistenFn | undefined;
     let unlistenInstaller: UnlistenFn | undefined;
 
-    // Background check on load if not checked yet
     if (!updateResult && !checking && !error) {
       checkAppUpdates();
     }
@@ -40,7 +39,7 @@ export default function UpdatesSection() {
       if (event.payload.completed) {
         setTimeout(() => {
           setInstallingUpdate(false);
-        }, 1500);
+        }, 2500);
       }
     }).then((un) => (unlistenUpdate = un));
 
@@ -64,9 +63,9 @@ export default function UpdatesSection() {
 
   const handleInstallUpdate = async () => {
     setInstallingUpdate(true);
-    setUpdateProgress({ stage: "init", percent: 0, message: "Preparing update...", completed: false });
+    setUpdateProgress({ stage: "init", percent: 0, message: "Preparing update download...", completed: false });
     try {
-      await invoke("download_and_install_update");
+      await invoke("download_and_install_update", { downloadUrl: updateResult?.download_url });
     } catch (err) {
       console.error(err);
       setInstallingUpdate(false);
@@ -76,7 +75,7 @@ export default function UpdatesSection() {
   const handleRunInstaller = async () => {
     setInstallingCustom(true);
     setCustomDone(false);
-    setCustomProgress({ stage: "init", percent: 0, message: "Initializing package...", completed: false });
+    setCustomProgress({ stage: "init", percent: 0, message: "Initializing environment setup...", completed: false });
     try {
       await invoke("run_custom_installer", { config: installerConfig });
     } catch (err) {
@@ -91,17 +90,21 @@ export default function UpdatesSection() {
 
   return (
     <div className="updates-section-container">
+      {/* Hero Banner Header */}
       <div className="updates-hero-banner">
         <div className="updates-hero-info">
-          <h2>Application Updates & Setup</h2>
-          <p className="hint">
-            Keep Kestrel running on the latest cutting-edge release, review changelogs, or customize your local environment installation.
+          <div className="updates-hero-title-row">
+            <h2>Application Updates & Setup</h2>
+            <span className="updates-channel-tag">Stable Release Channel</span>
+          </div>
+          <p className="updates-hero-desc">
+            Keep Kestrel updated with the latest release features, review changelogs, or configure your local environment installation.
           </p>
         </div>
         <div className="updates-status-badge-container">
           <div className={`status-orb ${updateResult?.has_update ? "has-update" : "up-to-date"}`} />
           <div className="status-badge-text">
-            <span className="current-ver-label">Current: v{updateResult?.current_version || "1.0.2"}</span>
+            <span className="current-ver-label">Installed: v{updateResult?.current_version || "1.0.4"}</span>
             {updateResult?.has_update ? (
               <span className="update-available-pill">New v{updateResult.latest_version} Available!</span>
             ) : (
@@ -111,14 +114,21 @@ export default function UpdatesSection() {
         </div>
       </div>
 
+      {/* Main Grid */}
       <div className="updates-grid-layout">
-        {/* Left Column: Software Updates Card */}
+        {/* Left Column: Software Updates */}
         <div className="update-card glass-panel">
           <div className="card-header">
-            <div className="card-icon">🚀</div>
+            <div className="card-icon-wrap violet">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </div>
             <div>
               <h3>Software Updates</h3>
-              <p className="card-subtitle">Check release feeds and install OTA updates</p>
+              <p className="card-subtitle">GitHub release channel and OTA installation</p>
             </div>
           </div>
 
@@ -126,65 +136,94 @@ export default function UpdatesSection() {
             {checking ? (
               <div className="update-status-box checking">
                 <div className="spinner-orb" />
-                <p>Checking GitHub release channel...</p>
+                <p>Checking GitHub release feed...</p>
               </div>
             ) : error ? (
               <div className="update-status-box error">
-                <p className="error-text">{error}</p>
-                <button onClick={handleCheckUpdates} className="btn-secondary">
-                  Retry Check
-                </button>
+                <div className="error-icon">⚠️</div>
+                <div className="error-details">
+                  <p className="error-text">{error}</p>
+                  <button onClick={handleCheckUpdates} className="btn-secondary small-btn">
+                    Retry Check
+                  </button>
+                </div>
               </div>
             ) : updateResult?.has_update ? (
               <div className="update-status-box available">
                 <div className="release-highlight">
-                  <h4>{updateResult.release_name}</h4>
-                  <span className="release-date">Published: {new Date(updateResult.published_at).toLocaleDateString()}</span>
+                  <div>
+                    <span className="release-version-tag">v{updateResult.latest_version}</span>
+                    <h4 className="release-title">{updateResult.release_name}</h4>
+                  </div>
+                  {updateResult.published_at && (
+                    <span className="release-date">
+                      Published: {new Date(updateResult.published_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
                 </div>
-                <div className="release-notes-preview">
-                  <ul className="commit-list">
-                    {updateResult.release_notes.split("\n").slice(0, 5).map((line, i) => {
-                      const m = line.match(/^\* (.+) \(([a-f0-9]+)\)$/);
-                      if (m) {
+                {updateResult.release_notes && (
+                  <div className="release-notes-preview">
+                    <span className="release-notes-heading">Changelog Highlights</span>
+                    <ul className="commit-list">
+                      {updateResult.release_notes.split("\n").slice(0, 6).map((line, i) => {
+                        const trimmed = line.trim();
+                        if (!trimmed) return null;
+                        const m = trimmed.match(/^\* (.+) \(([a-f0-9]+)\)$/);
+                        if (m) {
+                          return (
+                            <li key={i} className="commit-item">
+                              <span className="commit-badge">{m[2].substring(0, 7)}</span>
+                              <span className="commit-msg">{m[1]}</span>
+                            </li>
+                          );
+                        }
                         return (
-                          <li key={i} className="commit-item">
-                            <span className="commit-badge">{m[2].substring(0, 7)}</span>
-                            <span className="commit-msg">{m[1]}</span>
+                          <li key={i} className="commit-item generic">
+                            <span className="commit-bullet">•</span>
+                            <span className="commit-msg">{trimmed.replace(/^[*-]\s*/, '')}</span>
                           </li>
                         );
-                      }
-                      return <li key={i}>{line}</li>;
-                    })}
-                  </ul>
-                </div>
+                      })}
+                    </ul>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="update-status-box up-to-date">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#50fa7b" strokeWidth="2.5">
-                  <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <p>You are running the latest stable build (v{updateResult?.current_version || "1.0.2"}).</p>
+                <div className="check-success-circle">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div>
+                  <h4 className="up-to-date-title">You're on the latest build</h4>
+                  <p className="up-to-date-subtitle">Kestrel v{updateResult?.current_version || "1.0.4"} is active and running cleanly.</p>
+                </div>
               </div>
             )}
 
             {installingUpdate && updateProgress && (
-              <div className="live-progress-container animate-fade-in">
+              <div className="live-progress-container">
+                <div className="progress-status-row">
+                  <span className="progress-msg">{updateProgress.message}</span>
+                  <span className="progress-pct">{updateProgress.percent}%</span>
+                </div>
                 <div className="progress-bar-container">
                   <div
                     className="progress-bar-fill shimmer-effect"
                     style={{ width: `${updateProgress.percent}%` }}
                   />
                 </div>
-                <div className="progress-status-row">
-                  <span>{updateProgress.message}</span>
-                  <span className="progress-pct">{updateProgress.percent}%</span>
-                </div>
               </div>
             )}
           </div>
 
           <div className="card-footer">
-            <button onClick={handleCheckUpdates} disabled={checking || installingUpdate} className="btn-secondary">
+            <button
+              onClick={handleCheckUpdates}
+              disabled={checking || installingUpdate}
+              className="btn-secondary"
+            >
               {checking ? "Checking..." : "Check for Updates"}
             </button>
             {updateResult?.has_update && !installingUpdate && (
@@ -195,81 +234,106 @@ export default function UpdatesSection() {
           </div>
         </div>
 
-        {/* Right Column: Custom Installer & Setup Card */}
+        {/* Right Column: Custom Installer & Setup Wizard */}
         <div className="update-card glass-panel">
           <div className="card-header">
-            <div className="card-icon">🛠️</div>
+            <div className="card-icon-wrap gold">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+            </div>
             <div>
-              <h3>Custom Installer Wizard</h3>
+              <h3>Custom Installer & Environment</h3>
               <p className="card-subtitle">Configure installation paths, shortcuts, and protocols</p>
             </div>
           </div>
 
           <div className="card-body">
             {!installingCustom && !customDone ? (
-              <div className="installer-config-form animate-fade-in">
+              <div className="installer-config-form">
                 <div className="form-group">
-                  <label>Target Directory</label>
-                  <input
-                    type="text"
-                    value={installerConfig.install_dir}
-                    onChange={(e) => setInstallerConfig({ ...installerConfig, install_dir: e.target.value })}
-                  />
+                  <label className="form-label">Target Directory</label>
+                  <div className="input-with-icon">
+                    <span className="input-icon">📁</span>
+                    <input
+                      type="text"
+                      className="text-input"
+                      value={installerConfig.install_dir}
+                      onChange={(e) => setInstallerConfig({ ...installerConfig, install_dir: e.target.value })}
+                    />
+                  </div>
                 </div>
 
                 <div className="toggle-grid">
-                  <label className="checkbox-label">
+                  <label className="checkbox-card" onClick={() => handleToggleConfig("create_desktop_shortcut")}>
                     <input
                       type="checkbox"
                       checked={installerConfig.create_desktop_shortcut}
-                      onChange={() => handleToggleConfig("create_desktop_shortcut")}
+                      onChange={() => {}}
                     />
-                    <span>Desktop Shortcut</span>
+                    <div className="checkbox-info">
+                      <span className="checkbox-title">Desktop Shortcut</span>
+                      <span className="checkbox-desc">Add Kestrel icon to desktop</span>
+                    </div>
                   </label>
-                  <label className="checkbox-label">
+
+                  <label className="checkbox-card" onClick={() => handleToggleConfig("create_start_menu_shortcut")}>
                     <input
                       type="checkbox"
                       checked={installerConfig.create_start_menu_shortcut}
-                      onChange={() => handleToggleConfig("create_start_menu_shortcut")}
+                      onChange={() => {}}
                     />
-                    <span>Start Menu Entry</span>
+                    <div className="checkbox-info">
+                      <span className="checkbox-title">Start Menu Entry</span>
+                      <span className="checkbox-desc">Add entry to application menu</span>
+                    </div>
                   </label>
-                  <label className="checkbox-label">
+
+                  <label className="checkbox-card" onClick={() => handleToggleConfig("register_protocol")}>
                     <input
                       type="checkbox"
                       checked={installerConfig.register_protocol}
-                      onChange={() => handleToggleConfig("register_protocol")}
+                      onChange={() => {}}
                     />
-                    <span>Register Protocol (kestrel://)</span>
+                    <div className="checkbox-info">
+                      <span className="checkbox-title">Register Protocol</span>
+                      <span className="checkbox-desc">Enable kestrel:// deep links</span>
+                    </div>
                   </label>
-                  <label className="checkbox-label">
+
+                  <label className="checkbox-card" onClick={() => handleToggleConfig("launch_on_finish")}>
                     <input
                       type="checkbox"
                       checked={installerConfig.launch_on_finish}
-                      onChange={() => handleToggleConfig("launch_on_finish")}
+                      onChange={() => {}}
                     />
-                    <span>Launch on Finish</span>
+                    <div className="checkbox-info">
+                      <span className="checkbox-title">Launch on Finish</span>
+                      <span className="checkbox-desc">Automatically launch Kestrel</span>
+                    </div>
                   </label>
                 </div>
               </div>
             ) : installingCustom ? (
-              <div className="live-progress-container animate-fade-in">
+              <div className="live-progress-container">
+                <div className="progress-status-row">
+                  <span className="progress-msg">{customProgress?.message || "Running setup..."}</span>
+                  <span className="progress-pct">{customProgress?.percent || 0}%</span>
+                </div>
                 <div className="progress-bar-container">
                   <div
                     className="progress-bar-fill gold-gradient shimmer-effect"
                     style={{ width: `${customProgress?.percent || 0}%` }}
                   />
                 </div>
-                <div className="progress-status-row">
-                  <span>{customProgress?.message}</span>
-                  <span className="progress-pct">{customProgress?.percent}%</span>
-                </div>
               </div>
             ) : (
-              <div className="installer-done-box rune-flare animate-fade-in">
+              <div className="installer-done-box">
                 <div className="success-icon-wrap">✨</div>
-                <h4>Setup Successfully Completed!</h4>
-                <p>Kestrel environment is configured and ready for action.</p>
+                <h4>Environment Successfully Configured!</h4>
+                <p>Kestrel settings and shortcuts have been saved and applied.</p>
               </div>
             )}
           </div>
@@ -277,7 +341,7 @@ export default function UpdatesSection() {
           <div className="card-footer">
             {!installingCustom && !customDone && (
               <button onClick={handleRunInstaller} className="btn-primary gold-btn">
-                Run Custom Installer
+                Run Setup Wizard
               </button>
             )}
             {customDone && (
