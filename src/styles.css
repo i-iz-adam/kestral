@@ -1233,6 +1233,61 @@ button:not(:disabled):hover {
   animation: rune-flare 0.6s var(--ease-spring) both;
 }
 
+.session-usage-badge { font-size: 12px; font-family: monospace; background: var(--surface-2); border: 1px solid var(--border); padding: 2px 8px; border-radius: 4px; color: var(--text-dim); margin-left: auto; }
+
+
+/* Issue #28: Stronger visual grammar per tool category */
+.tool-row {
+  border-left: 3px solid var(--border);
+}
+.tool-row.done {
+  border-left-color: var(--accent-dim);
+}
+.tool-row.start, .tool-row.awaiting-approval {
+  border-left-color: var(--accent);
+}
+.tool-row.error {
+  border-left-color: var(--danger);
+}
+.tool-row[data-tool="write_file"],
+.tool-row[data-tool="edit_file"],
+.tool-row[data-tool="apply_patch"],
+.tool-row[data-tool="run_shell"],
+.tool-row[data-tool="run_python"] {
+  border-left-color: var(--gold-dim);
+}
+.tool-row[data-tool="write_file"].start,
+.tool-row[data-tool="edit_file"].start,
+.tool-row[data-tool="apply_patch"].start,
+.tool-row[data-tool="run_shell"].start,
+.tool-row[data-tool="run_python"].start,
+.tool-row[data-tool="write_file"].awaiting-approval,
+.tool-row[data-tool="edit_file"].awaiting-approval,
+.tool-row[data-tool="apply_patch"].awaiting-approval,
+.tool-row[data-tool="run_shell"].awaiting-approval,
+.tool-row[data-tool="run_python"].awaiting-approval {
+  border-left-color: var(--gold);
+}
+.tool-row[data-tool="run_shell"].error,
+.tool-row[data-tool="run_python"].error,
+.tool-row[data-tool="edit_file"].error,
+.tool-row[data-tool="apply_patch"].error,
+.tool-row[data-tool="write_file"].error {
+  border-left-color: var(--danger);
+}
+
+
+.session-usage-badge {
+  font-size: 12px;
+  font-family: monospace;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
 .tool-name {
   font-family: monospace;
   color: var(--accent);

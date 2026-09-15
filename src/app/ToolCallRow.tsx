@@ -78,7 +78,7 @@ export default function ToolCallRow({
   }, []);
 
   return (
-    <div className={"tool-row " + event.status + (igniting ? " ignite" : "")}>
+    <div className={"tool-row " + event.status + (igniting ? " ignite" : "")} data-tool={event.name}>
       <span className="tool-name">{event.name}</span>
       {argSummary && <span className="tool-arg">{argSummary}</span>}
       <span className="tool-status">{event.status}</span>

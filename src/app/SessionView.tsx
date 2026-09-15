@@ -358,7 +358,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           title={sending ? "The agent is working" : "Idle"}
         />
         <h2>{session.title}</h2>
-        <span className="hint">{session.mode}</span>
+        <span className="session-usage-badge">⚡ {session.messages.length} msgs</span> <span className="hint">{session.mode}</span>
       </div>
 
       <div className="message-list">
