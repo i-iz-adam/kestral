@@ -66,7 +66,7 @@ export default function AppShell() {
                 <AmbientMotes count={24} />
               </div>
               <p>Pick a session on the left, or start a new one.</p>
-              <button className="primary" style={{ marginTop: "16px", zIndex: 1 }} onClick={() => document.querySelector<HTMLButtonElement>(".sidebar > button.primary")?.click()}>New Session</button>
+              <button className="primary" style={{ marginTop: "16px", zIndex: 1 }} onClick={() => document.querySelector<HTMLButtonElement>(".sidebar button.primary")?.click()}>New Session</button>
             </div>
           )}
         </div>

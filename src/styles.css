@@ -563,20 +563,26 @@ button:not(:disabled):hover {
   accent-color: var(--accent);
 }
 
-.sidebar > button.primary {
+.sidebar button.primary {
   background: linear-gradient(135deg, var(--accent), #7a4fe0);
   border: none;
   color: #fff;
-  font-weight: 500;
+  font-weight: 600;
   padding: 10px;
   border-radius: 8px;
   cursor: pointer;
   box-shadow: 0 0 0 1px var(--border-soft), var(--shadow-sm);
+  transition: all 0.15s ease;
 }
 
-.sidebar > button.primary:hover:not(:disabled) {
+.sidebar button.primary:hover:not(:disabled) {
   filter: brightness(1.1);
   box-shadow: 0 0 0 1px var(--border-soft), 0 0 20px -4px var(--accent-glow), var(--shadow-sm);
+}
+
+.sidebar button.primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .session-list {
