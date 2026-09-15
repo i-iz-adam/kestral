@@ -19,7 +19,7 @@ pub struct Session {
     pub workspace: String,
     /// Whether the agent has delegate_to_subagent available and is told to
     /// prefer it for bulky/exploratory work. Defaults to true (including
-    /// for sessions saved before this field existed) Ã¢â‚¬â€ sub-agents are the
+    /// for sessions saved before this field existed) — sub-agents are the
     /// default behavior, not an opt-in.
     #[serde(default = "default_true")]
     pub subagents_enabled: bool,
@@ -38,7 +38,7 @@ pub struct Session {
     #[serde(default)]
     pub updated_at: Option<u64>,
     /// Counts turns since the last skill-distillation reflection pass (see
-    /// reflect.rs) â€” debounces it to roughly once every REFLECT_EVERY_N_TURNS
+    /// reflect.rs) — debounces it to roughly once every REFLECT_EVERY_N_TURNS
     /// turns that did real (mutating/delegated) work, rather than running an
     /// extra model call after every single turn. Defaults to 0 for sessions
     /// saved before this field existed, which just means their next
@@ -169,9 +169,15 @@ pub fn set_planning_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bo
 pub fn save(app_handle: &tauri::AppHandle, session: &Session) {
     let mut session_to_save = session.clone();
     session_to_save.updated_at = Some(now_ms());
-    let path = sessions_dir(app_handle).join(format!("{}.json", session_to_save.id));
+    let dir = sessions_dir(app_handle);
+    let path = dir.join(format!("{}.json", session_to_save.id));
+    let temp_path = dir.join(format!("{}.json.tmp.{}", session_to_save.id, Uuid::new_v4()));
     if let Ok(data) = serde_json::to_string_pretty(&session_to_save) {
-        let _ = fs::write(path, data);
+        if fs::write(&temp_path, &data).is_ok() {
+            if fs::rename(&temp_path, &path).is_err() {
+                let _ = fs::remove_file(&temp_path);
+            }
+        }
     }
 }
 
