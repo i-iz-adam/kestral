@@ -367,10 +367,18 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         {timelineNodes}
 
         {showThinking && (
-          <div className="thinking-indicator" aria-label="Assistant is thinking">
-            <span />
-            <span />
-            <span />
+          <div className="thinking-indicator" aria-label="Kestrel is scanning">
+            <div className="kestrel-hover-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2c-3 3-7 5-9 7l4 2 5-4 5 4 4-2c-2-2-6-4-9-7z" />
+                <path d="M12 11v6" />
+                <path d="M9 21l3-4 3 4" />
+              </svg>
+            </div>
+            <div className="kestrel-scan-content">
+              <span className="kestrel-thinking-text">Scanning…</span>
+              <div className="kestrel-scan-beam" />
+            </div>
           </div>
         )}
 

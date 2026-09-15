@@ -948,6 +948,15 @@ button:not(:disabled):hover {
   animation: block-settle 0.34s var(--ease) both;
 }
 
+@keyframes chunk-fade {
+  from { opacity: 0.3; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message.streaming .markdown > * {
+  animation: chunk-fade 0.18s var(--ease) both;
+}
+
 .message:not(.streaming) .markdown > *:nth-child(1) { animation-delay: 0s; }
 .message:not(.streaming) .markdown > *:nth-child(2) { animation-delay: 0.05s; }
 .message:not(.streaming) .markdown > *:nth-child(3) { animation-delay: 0.1s; }
@@ -5337,4 +5346,97 @@ button.github-card:hover {
   align-items: center;
   gap: 8px;
   justify-content: center;
+}
+
+/* ---- kestrel hovering / scanning thinking indicator ---- */
+.thinking-indicator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  align-self: flex-start;
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--accent-dim);
+  border-radius: 12px;
+  padding: 10px 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), inset 0 0 12px rgba(99, 102, 241, 0.05);
+  animation: message-in 0.28s var(--ease) both;
+}
+
+.kestrel-hover-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  animation: kestrel-hover-anim 1.8s ease-in-out infinite;
+}
+
+@keyframes kestrel-hover-anim {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-4px) scale(1.04); }
+}
+
+.kestrel-scan-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kestrel-thinking-text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 0.3px;
+}
+
+.kestrel-scan-beam {
+  width: 80px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: kestrel-scan-anim 1.5s ease-in-out infinite;
+  border-radius: 999px;
+}
+
+@keyframes kestrel-scan-anim {
+  0% { transform: translateX(-15px) scaleX(0.5); opacity: 0.3; }
+  50% { transform: translateX(10px) scaleX(1.2); opacity: 1; }
+  100% { transform: translateX(-15px) scaleX(0.5); opacity: 0.3; }
+}
+
+/* ---- unified card styling (Diff cards, Subagent cards, GitHub cards) ---- */
+.tool-row, button.github-card, .subagent-card-animated {
+  border-radius: 12px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18), var(--shadow-sm) !important;
+  transition: all 0.2s var(--ease) !important;
+}
+
+.tool-row:hover, button.github-card:hover, .subagent-card-animated:hover {
+  border-color: var(--accent) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 22px rgba(99, 102, 241, 0.2), var(--shadow-md) !important;
+}
+
+/* ---- session search box in sidebar ---- */
+.session-search-container {
+  padding: 0 12px;
+}
+
+.session-search-input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+
+.session-search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim);
+}
+
+.session-search-input::placeholder {
+  color: var(--text-dim);
 }

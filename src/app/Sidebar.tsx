@@ -42,6 +42,7 @@ export default function Sidebar({
     getActiveWorkspace()
   );
   const [creating, setCreating] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [, setTick] = useState(0);
 
@@ -111,6 +112,10 @@ export default function Sidebar({
     return bTime - aTime;
   });
 
+  const searchedSessions = sortedSessions.filter((s) =>
+    searchQuery.trim() === "" || s.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   const createSession = async () => {
     setError(null);
     setCreating(true);
@@ -151,8 +156,18 @@ export default function Sidebar({
       </button>
       {error && <p className="fail small">{error}</p>}
 
-      <div className="session-list" style={{ marginTop: 12 }}>
-        {sortedSessions.map((s) => (
+      <div className="session-search-container" style={{ marginTop: 10 }}>
+        <input
+          type="text"
+          placeholder="Search sessions..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="session-search-input"
+        />
+      </div>
+
+      <div className="session-list" style={{ marginTop: 8 }}>
+        {searchedSessions.map((s) => (
           <SessionListItem
             key={s.id}
             session={s}
