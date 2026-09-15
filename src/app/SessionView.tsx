@@ -4,6 +4,7 @@ import type { HistoryItem, ToolCallEventPayload, TimelineItem } from "../types";
 import GithubToolCard from "./GithubToolCard";
 import ToolCallRow from "./ToolCallRow";
 import SubagentCard from "./SubagentCard";
+import SubagentView from "./SubagentView";
 import DiffToolCard from "./DiffToolCard";
 import MessageContent from "./MessageContent";
 import WorkspacePicker from "./WorkspacePicker";
@@ -37,18 +38,20 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   // whether this component is mounted — see agentStore.ts. Switching to
   // another session and back (or opening Providers/Settings, which used
   // to unmount this entirely) no longer loses a turn in progress.
-  const { session, timeline, liveCalls, sending } = useAgentSession(sessionId);
+  const { session, timeline, liveCalls, subagentCalls, sending } = useAgentSession(sessionId);
   const [input, setInput] = useState("");
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [editingWorkspace, setEditingWorkspace] = useState(false);
   const [workspaceDraft, setWorkspaceDraft] = useState<string | null>(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [activeSubagentId, setActiveSubagentId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     ensureAgentEventsStarted();
     loadSession(sessionId);
+    setActiveSubagentId(null);
   }, [sessionId]);
 
   useEffect(() => {
@@ -265,14 +268,13 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       return <SkillLoadedCard key={call.call_id} event={call} />;
     }
     if (call.name === "delegate_to_subagent") {
+      const calls = (subagentCalls && subagentCalls[call.call_id]) ? subagentCalls[call.call_id] : nested;
       return (
         <SubagentCard
           key={call.call_id}
           event={call}
-          calls={nested}
-          workspace={session.workspace}
-          onPromptFix={promptFix}
-          onApprove={approve}
+          calls={calls}
+          onOpen={() => setActiveSubagentId(call.call_id)}
         />
       );
     }
@@ -371,6 +373,31 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   // itself (with its blinking cursor) is the "thinking" indicator.
   const showThinking =
     sending && !timeline.some((item) => item.kind === "message" && item.streaming);
+
+  if (activeSubagentId) {
+    let subagentEvent = liveCalls.find((c) => c.call_id === activeSubagentId);
+    if (!subagentEvent) {
+      const histItem = historyItems.find((h) => h.kind === "tool" && h.call.call_id === activeSubagentId);
+      if (histItem && histItem.kind === "tool") {
+        subagentEvent = histItem.call;
+      }
+    }
+    if (subagentEvent) {
+      const childCalls = (subagentCalls && subagentCalls[activeSubagentId])
+        ? subagentCalls[activeSubagentId]
+        : liveCalls.filter((n) => n.parent_call_id === activeSubagentId);
+      return (
+        <SubagentView
+          event={subagentEvent}
+          subagentCalls={childCalls}
+          workspace={session.workspace}
+          onBack={() => setActiveSubagentId(null)}
+          onPromptFix={promptFix}
+          onApprove={approve}
+        />
+      );
+    }
+  }
 
   return (
     <div className="session-view">

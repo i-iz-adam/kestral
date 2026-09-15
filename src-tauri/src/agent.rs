@@ -413,12 +413,17 @@ pub(crate) fn emit_tool_event(
 /// generically, so this gets ordering, grouping, and a place in the
 /// timeline for free — it just special-cases this one name into its own
 /// animated card instead of a plain tool row (see SkillLoadedCard.tsx).
-pub(crate) fn emit_skill_loaded(app_handle: &tauri::AppHandle, session_id: &str, skill: &skills::Skill) {
+pub(crate) fn emit_skill_loaded(
+    app_handle: &tauri::AppHandle,
+    session_id: &str,
+    skill: &skills::Skill,
+    parent_call_id: Option<&str>,
+) {
     let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
     let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
     emit_tool_event(
         app_handle, session_id, &call_id, "__skill_loaded__", "done",
-        Some(args), Some(skill.description.clone()), None,
+        Some(args), Some(skill.description.clone()), parent_call_id,
     );
 }
 
@@ -800,7 +805,7 @@ async fn run_turn_inner(
         for skill in matched {
             if !loaded_skill_ids.contains(&skill.id) {
                 if skills::get_content(app_handle, &skill.id, workspace).is_some() {
-                    emit_skill_loaded(app_handle, session_id, &skill);
+                    emit_skill_loaded(app_handle, session_id, &skill, None);
                     let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
                     let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
                     session.messages.push(ChatMessage {
