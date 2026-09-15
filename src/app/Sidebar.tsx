@@ -10,8 +10,6 @@ import {
   getRecord,
 } from "./agentStore";
 
-type Mode = "coding" | "general";
-
 interface Props {
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
@@ -37,7 +35,6 @@ export default function Sidebar({
 }: Props) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [mode, setMode] = useState<Mode>("coding");
   const [activeWorkspacePath, setActiveWorkspacePathState] = useState<string | null>(
     getActiveWorkspace()
   );
@@ -162,10 +159,10 @@ export default function Sidebar({
     setError(null);
     setCreating(true);
     try {
-      const title = mode === "coding" ? "New coding session" : "New chat";
+      const title = "New session";
       const session = await invoke<Session>("create_session", {
         title,
-        mode,
+        mode: "coding",
         workspace: getActiveWorkspace(),
       });
       fetchSessions();
@@ -260,21 +257,6 @@ export default function Sidebar({
 
   return (
     <div className="sidebar">
-      <div className="mode-toggle small">
-        <button
-          className={mode === "coding" ? "active" : ""}
-          onClick={() => setMode("coding")}
-        >
-          Coding
-        </button>
-        <button
-          className={mode === "general" ? "active" : ""}
-          onClick={() => setMode("general")}
-        >
-          General AI
-        </button>
-      </div>
-
       <div style={{ display: "flex", gap: 6 }}>
         <button className="primary" onClick={createSession} disabled={creating} style={{ flex: 1, marginTop: 8 }}>
           {creating ? "Creating..." : "New session"}
