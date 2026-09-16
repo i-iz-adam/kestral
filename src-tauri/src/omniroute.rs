@@ -1,9 +1,21 @@
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::config::OmniRouteConfig;
+
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+pub fn get_http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
 
 /// Retry policy for the model call itself. There's already 429-handling
 /// for web_search/web_fetch and a 401/403-retry-without-auth for the main
@@ -148,7 +160,7 @@ pub async fn fetch_endpoint(
     let method_str = method.unwrap_or("GET").to_uppercase();
 
     let build_request = |with_auth: bool| {
-        let client = reqwest::Client::new();
+        let client = get_http_client();
         let mut req = match method_str.as_str() {
             "POST" => client.post(&url),
             "PUT" => client.put(&url),
@@ -246,7 +258,7 @@ fn accumulate_tool_call_delta(tool_acc: &mut ToolAcc, calls: &[Value]) {
 pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
     if let Ok(base) = base_url(cfg) {
         let url = format!("{}/v1/models", base);
-        let client = reqwest::Client::new();
+        let client = get_http_client();
         let mut req = client.get(&url);
         if let Some(key) = &cfg.api_key {
             if !key.is_empty() {
@@ -453,7 +465,7 @@ pub async fn chat_completion(
 
     let mut attempt = 0u32;
     loop {
-        let client = reqwest::Client::new();
+        let client = get_http_client();
         let mut req = client.post(&url).json(&body);
         if let Some(key) = &cfg.api_key {
             if !key.is_empty() {
@@ -547,7 +559,7 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     let resp = {
         let mut attempt = 0u32;
         loop {
-            let client = reqwest::Client::new();
+            let client = get_http_client();
             let mut req = client.post(&url).json(&body);
             if let Some(key) = &cfg.api_key {
                 if !key.is_empty() {
@@ -726,7 +738,7 @@ pub async fn web_search(
         body["limit"] = serde_json::json!(l);
     }
 
-    let client = reqwest::Client::new();
+    let client = get_http_client();
     let mut req = client.post(&url).json(&body);
     if let Some(key) = &cfg.api_key {
         if !key.is_empty() {
@@ -818,7 +830,7 @@ pub async fn web_fetch(
         }
     }
 
-    let client = reqwest::Client::new();
+    let client = get_http_client();
     let mut req = client.post(&endpoint).json(&body);
     if let Some(key) = &cfg.api_key {
         if !key.is_empty() {
