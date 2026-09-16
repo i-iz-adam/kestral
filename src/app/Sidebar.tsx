@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode, useCallback, useRef } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import type { Session, Workspace } from "../types";
 import EngineStatusBadge from "./EngineStatusBadge";
 import { useAgentSession } from "./useAgentSession";

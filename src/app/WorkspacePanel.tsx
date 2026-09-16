@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
-import { open as openDialog } from "@tauri-apps/api/dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Workspace } from "../types";
 import { getActiveWorkspace, setActiveWorkspace, subscribeActiveWorkspace } from "./agentStore";
 

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface UpdateCheckResult {
   has_update: boolean;

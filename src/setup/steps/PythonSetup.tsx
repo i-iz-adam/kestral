@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
-import { open } from "@tauri-apps/api/shell";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-shell";
 import type { StepProps } from "../types";
 
 export interface PythonStatusPayload {

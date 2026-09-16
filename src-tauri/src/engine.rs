@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -43,12 +43,12 @@ struct EngineEvent {
 }
 
 fn emit(app_handle: &tauri::AppHandle, status: EngineStatus, error: Option<String>) {
-    let _ = app_handle.emit_all("engine://status", EngineEvent { status, error });
+    let _ = app_handle.emit("engine://status", EngineEvent { status, error });
 }
 
 fn engine_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir")
         .join("engine")
@@ -94,7 +94,7 @@ struct InstallDoneEvent {
 pub async fn install(app_handle: tauri::AppHandle) {
     let dir = engine_dir(&app_handle);
     if let Err(e) = std::fs::create_dir_all(&dir) {
-        let _ = app_handle.emit_all(
+        let _ = app_handle.emit(
             "engine://install-done",
             InstallDoneEvent { success: false, error: Some(e.to_string()) },
         );
@@ -121,7 +121,7 @@ pub async fn install(app_handle: tauri::AppHandle) {
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            let _ = app_handle.emit_all(
+            let _ = app_handle.emit(
                 "engine://install-done",
                 InstallDoneEvent { success: false, error: Some(e.to_string()) },
             );
@@ -134,7 +134,7 @@ pub async fn install(app_handle: tauri::AppHandle) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let _ = handle.emit_all("engine://install-log", InstallLogEvent { line });
+                let _ = handle.emit("engine://install-log", InstallLogEvent { line });
             }
         });
     }
@@ -143,7 +143,7 @@ pub async fn install(app_handle: tauri::AppHandle) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let _ = handle.emit_all("engine://install-log", InstallLogEvent { line });
+                let _ = handle.emit("engine://install-log", InstallLogEvent { line });
             }
         });
     }
@@ -154,10 +154,10 @@ pub async fn install(app_handle: tauri::AppHandle) {
             cfg.use_local_install = true;
             let _ = crate::config::save_engine_config(&app_handle, &cfg);
             let _ = app_handle
-                .emit_all("engine://install-done", InstallDoneEvent { success: true, error: None });
+                .emit("engine://install-done", InstallDoneEvent { success: true, error: None });
         }
         Ok(status) => {
-            let _ = app_handle.emit_all(
+            let _ = app_handle.emit(
                 "engine://install-done",
                 InstallDoneEvent {
                     success: false,
@@ -166,7 +166,7 @@ pub async fn install(app_handle: tauri::AppHandle) {
             );
         }
         Err(e) => {
-            let _ = app_handle.emit_all(
+            let _ = app_handle.emit(
                 "engine://install-done",
                 InstallDoneEvent { success: false, error: Some(e.to_string()) },
             );

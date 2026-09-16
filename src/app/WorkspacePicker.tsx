@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
-import { open } from "@tauri-apps/api/dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { Workspace } from "../types";
 
 const ADD_NEW = "__add_workspace__";

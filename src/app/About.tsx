@@ -1,7 +1,7 @@
 import { useState } from "react";
 import UpdaterModal from "./UpdaterModal";
 import CustomInstallerModal from "./CustomInstallerModal";
-import { open } from "@tauri-apps/api/shell";
+import { open } from "@tauri-apps/plugin-shell";
 import { useUpdaterStore } from "./updaterStore";
 
 export default function About() {

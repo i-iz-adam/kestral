@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
-use tauri::Manager;
+use tauri::Emitter;
 use tokio::sync::{oneshot, Notify};
 
 use crate::config;
@@ -368,7 +368,7 @@ pub(crate) async fn maybe_auto_generate_title(
             if !cleaned.is_empty() {
                 session.title = cleaned;
                 sessions::save(app_handle, session);
-                let _ = app_handle.emit_all(
+                let _ = app_handle.emit(
                     "agent://session-title-updated",
                     SessionTitleUpdatedEvent {
                         session_id: &session.id,
@@ -413,7 +413,7 @@ pub(crate) fn emit_tool_event(
     result: Option<String>,
     parent_call_id: Option<&str>,
 ) {
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "agent://tool-call",
         ToolEvent { session_id, call_id, name, status, args, result, parent_call_id },
     );
@@ -638,7 +638,7 @@ pub async fn run_turn_with_stop(
     let stop_flag = stops.entry(&session_id);
     let result = run_turn_inner(&app_handle, approvals, &stops, stop_flag.clone(), &session_id, user_message, images).await;
     let reason = if stop_flag.requested.load(Ordering::Relaxed) { "stopped" } else { "normal" };
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "agent://turn-end",
         TurnEndEvent {
             session_id: &session_id,
@@ -670,7 +670,7 @@ async fn stream_assistant_turn(
     tools_schema: Option<&Value>,
 ) -> (String, Result<ChatMessage, String>) {
     let request_id = uuid::Uuid::new_v4().to_string();
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "agent://message-start",
         MessageStartEvent { session_id, request_id: &request_id, role: "assistant" },
     );
@@ -684,7 +684,7 @@ async fn stream_assistant_turn(
         request_messages,
         tools_schema,
         move |delta: &str| {
-            let _ = delta_app_handle.emit_all(
+            let _ = delta_app_handle.emit(
                 "agent://message-delta",
                 MessageDeltaEvent { session_id: &delta_session_id, request_id: &delta_request_id, delta },
             );
@@ -693,7 +693,7 @@ async fn stream_assistant_turn(
     .await;
 
     if result.is_err() {
-        let _ = app_handle.emit_all(
+        let _ = app_handle.emit(
             "agent://message-cancel",
             MessageCancelEvent { session_id, request_id: &request_id },
         );
@@ -726,7 +726,7 @@ async fn run_turn_inner(
         ..Default::default()
     });
     sessions::save(app_handle, &session);
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "agent://message",
         MessageEvent {
             session_id,
@@ -947,7 +947,7 @@ async fn run_turn_inner(
         let text = assistant_msg.content.clone().unwrap_or_default();
 
         if text.trim().is_empty() && tool_calls.is_empty() {
-            let _ = app_handle.emit_all(
+            let _ = app_handle.emit(
                 "agent://message-cancel",
                 MessageCancelEvent { session_id, request_id: &request_id },
             );
@@ -959,12 +959,12 @@ async fn run_turn_inner(
         if text.is_empty() {
             // Nothing to show for this turn (it went straight to tools) — drop the
             // placeholder instead of finalizing an empty bubble.
-            let _ = app_handle.emit_all(
+            let _ = app_handle.emit(
                 "agent://message-cancel",
                 MessageCancelEvent { session_id, request_id: &request_id },
             );
         } else {
-            let _ = app_handle.emit_all(
+            let _ = app_handle.emit(
                 "agent://message",
                 MessageEvent {
                     session_id,

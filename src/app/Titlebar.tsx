@@ -1,7 +1,8 @@
 import { useEffect, useState, MouseEvent } from "react";
-import { appWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export default function Titlebar() {
+  const appWindow = getCurrentWindow();
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
@@ -62,6 +63,8 @@ export default function Titlebar() {
   };
 
   const handleMouseDown = async (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest(".titlebar-controls")) return;
     if (e.button === 0 && e.detail === 1) {
       try {
         await appWindow.startDragging();

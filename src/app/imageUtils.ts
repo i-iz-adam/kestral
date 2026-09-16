@@ -1,4 +1,4 @@
-import { convertFileSrc } from "@tauri-apps/api/tauri";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 export interface ExtractedImage {
   src: string;

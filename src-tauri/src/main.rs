@@ -593,13 +593,16 @@ fn save_engine_config(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(agent::PendingApprovals::default())
         .manage(agent::StopRequests::default())
         .manage(engine::EngineState::default())
         .setup(|app| {
             let app_handle = app.handle();
-            if config::should_auto_start_engine(&app_handle) {
-                engine::start(app_handle);
+            if config::should_auto_start_engine(app_handle) {
+                engine::start(app_handle.clone());
             }
             Ok(())
         })
