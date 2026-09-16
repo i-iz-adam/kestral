@@ -1,76 +1,38 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Kestrel",
+  "version": "1.0.4",
+  "identifier": "dev.kestrel.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devPath": "http://localhost:5173",
-    "distDir": "../dist",
-    "withGlobalTauri": false
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
   },
-  "package": {
-    "productName": "Kestrel",
-    "version": "1.0.4"
-  },
-  "tauri": {
-    "allowlist": {
-      "dialog": {
-        "open": true
-      },
-      "fs": {
-        "readFile": true,
-        "writeFile": true,
-        "createDir": true,
-        "scope": [
-          "$APPCONFIG/*",
-          "$APPDATA/*"
-        ]
-      },
-      "path": {
-        "all": true
-      },
-      "shell": {
-        "open": true
-      },
-      "window": {
-        "all": true
-      }
-    },
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "dev.kestrel.app",
-      "icon": [
-        "icons/32x32.png",
-        "icons/128x128.png",
-        "icons/128x128@2x.png",
-        "icons/icon.ico"
-      ],
-      "windows": {
-        "certificateThumbprint": null,
-        "digestAlgorithm": "sha256",
-        "timestampUrl": ""
-      }
-    },
-    "updater": {
-      "active": false,
-      "endpoints": [
-        "https://github.com/i-iz-adam/kestral/releases/latest/download/latest.json"
-      ],
-      "dialog": false,
-      "pubkey": ""
-    },
-    "security": {
-      "csp": null
-    },
+  "app": {
     "windows": [
       {
-        "decorations": false,
         "title": "Kestrel",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
         "minHeight": 600,
-        "resizable": true
+        "resizable": true,
+        "decorations": false
       }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
     ]
   }
 }
