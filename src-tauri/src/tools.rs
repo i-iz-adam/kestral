@@ -334,27 +334,31 @@ fn resolve_path(workspace: &str, rel: &str) -> Result<PathBuf, String> {
     Ok(joined)
 }
 
-/// Walks `dir` recursively, calling `visit` for every file (not directory)
-/// found, skipping IGNORED_DIRS along the way. `visit` returns false to
-/// stop the walk early (e.g. once a result cap is hit) — propagated all
-/// the way back up through the recursion.
-fn walk_files<F: FnMut(&Path) -> bool>(dir: &Path, visit: &mut F) -> bool {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return true,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if IGNORED_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            if !walk_files(&path, visit) {
+/// Walks `dir` recursively using the `ignore` crate, respecting `.gitignore`
+/// rules and skipping IGNORED_DIRS. Calls `visit` for every file found.
+/// `visit` returns false to stop walking.
+fn walk_files<F: FnMut(&Path) -> bool>(dir: &Path, mut visit: F) -> bool {
+    let mut builder = ignore::WalkBuilder::new(dir);
+    builder.hidden(false);
+    builder.git_ignore(true);
+    builder.git_exclude(true);
+    builder.require_git(false);
+    builder.filter_entry(|entry| {
+        if let Some(name) = entry.file_name().to_str() {
+            if IGNORED_DIRS.contains(&name) {
                 return false;
             }
-        } else if !visit(&path) {
-            return false;
+        }
+        true
+    });
+
+    for result in builder.build() {
+        if let Ok(entry) = result {
+            if entry.file_type().map_or(false, |ft| ft.is_file()) {
+                if !visit(entry.path()) {
+                    return false;
+                }
+            }
         }
     }
     true
