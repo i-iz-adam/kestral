@@ -141,11 +141,11 @@ pub(crate) async fn maybe_reflect(
 
     session.turns_since_reflection += 1;
     if session.turns_since_reflection < REFLECT_EVERY_N_TURNS {
-        sessions::save(app_handle, session);
+        sessions::save_async(app_handle, session);
         return;
     }
     session.turns_since_reflection = 0;
-    sessions::save(app_handle, session);
+    sessions::save_async(app_handle, session);
 
     let transcript = condensed_transcript(session);
     if transcript.trim().is_empty() {

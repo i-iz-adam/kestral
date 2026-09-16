@@ -367,7 +367,7 @@ pub(crate) async fn maybe_auto_generate_title(
             let cleaned = clean_title(&content);
             if !cleaned.is_empty() {
                 session.title = cleaned;
-                sessions::save(app_handle, session);
+                sessions::save_async(app_handle, session);
                 let _ = app_handle.emit(
                     "agent://session-title-updated",
                     SessionTitleUpdatedEvent {
@@ -725,7 +725,7 @@ async fn run_turn_inner(
         images: images.clone(),
         ..Default::default()
     });
-    sessions::save(app_handle, &session);
+    sessions::save_async(app_handle, &session);
     let _ = app_handle.emit(
         "agent://message",
         MessageEvent {
@@ -880,7 +880,7 @@ async fn run_turn_inner(
         step_count += 1;
 
         if stop_flag.requested.load(Ordering::Relaxed) {
-            sessions::save(app_handle, &session);
+            sessions::save_async(app_handle, &session);
             return Ok(());
         }
 
@@ -889,7 +889,7 @@ async fn run_turn_inner(
         // checked once at the top of run_turn — so this runs every step.
         // Cheap no-op once the session is well under budget.
         if context::maybe_compact(&cfg, &mut session.messages, false).await {
-            sessions::save(app_handle, &session);
+            sessions::save_async(app_handle, &session);
         }
 
         let plan_items = plan::load(app_handle, session_id);
@@ -931,7 +931,7 @@ async fn run_turn_inner(
                 // compaction regardless of the estimate and retry exactly
                 // once before giving up.
                 if context::maybe_compact(&cfg, &mut session.messages, true).await {
-                    sessions::save(app_handle, &session);
+                    sessions::save_async(app_handle, &session);
                     let retry_messages = build_messages(&session);
                     let (rid2, res2) =
                         stream_assistant_turn(app_handle, &cfg, model, session_id, &retry_messages, tools_schema.as_ref()).await;
@@ -977,7 +977,7 @@ async fn run_turn_inner(
         }
 
         if tool_calls.is_empty() {
-            sessions::save(app_handle, &session);
+            sessions::save_async(app_handle, &session);
             // Reflection is a background housekeeping pass, not part of
             // what the user is waiting on — spawn it detached so it can't
             // add its own latency (a whole extra model round-trip) onto
@@ -1031,7 +1031,7 @@ async fn run_turn_inner(
         // different tools in one turn doesn't look like several steps.
         loop_detector.record_step(&text, &call_signatures);
 
-        sessions::save(app_handle, &session);
+        sessions::save_async(app_handle, &session);
 
         // Detect infinite loops: the exact same reasoning and the exact
         // same tool call(s) repeating verbatim, several turns running.
@@ -1045,7 +1045,7 @@ async fn run_turn_inner(
                 content: Some(msg.clone()),
                 ..Default::default()
             });
-            sessions::save(app_handle, &session);
+            sessions::save_async(app_handle, &session);
             return Err(msg);
         }
 
@@ -1057,7 +1057,7 @@ async fn run_turn_inner(
                 content: Some(msg.clone()),
                 ..Default::default()
             });
-            sessions::save(app_handle, &session);
+            sessions::save_async(app_handle, &session);
             return Err(msg);
         }
     }

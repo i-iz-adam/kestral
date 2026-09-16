@@ -202,6 +202,14 @@ pub fn save(app_handle: &tauri::AppHandle, session: &Session) {
     }
 }
 
+pub fn save_async(app_handle: &tauri::AppHandle, session: &Session) {
+    let app_handle = app_handle.clone();
+    let session = session.clone();
+    tokio::task::spawn_blocking(move || {
+        save(&app_handle, &session);
+    });
+}
+
 pub fn load(app_handle: &tauri::AppHandle, id: &str) -> Option<Session> {
     let path = sessions_dir(app_handle).join(format!("{}.json", id));
     let data = fs::read_to_string(path).ok()?;
