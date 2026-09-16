@@ -333,51 +333,61 @@ fn clean_title(raw: &str) -> String {
     result.trim().to_string()
 }
 
-pub(crate) async fn maybe_auto_generate_title(
+pub(crate) fn maybe_auto_generate_title(
     app_handle: &tauri::AppHandle,
     cfg: &config::OmniRouteConfig,
-    session: &mut Session,
+    session_id: &str,
+    session_title: &str,
     user_message: &str,
 ) {
-    if !is_default_title(&session.title) {
+    if !is_default_title(session_title) {
         return;
     }
 
-    let system_msg = ChatMessage {
-        role: "system".into(),
-        content: Some(
-            "You generate short, concise, descriptive session titles for a coding/chat app. \
-             Generate a brief title (3 to 6 words maximum) summarizing the user's request. \
-             Do NOT wrap in quotes. Do NOT add prefixes like 'Title:'. Respond ONLY with the title text."
-                .to_string(),
-        ),
-        ..Default::default()
-    };
+    let app_handle = app_handle.clone();
+    let cfg = cfg.clone();
+    let session_id = session_id.to_string();
+    let user_message = user_message.to_string();
 
-    let user_msg = ChatMessage {
-        role: "user".into(),
-        content: Some(user_message.to_string()),
-        ..Default::default()
-    };
+    tokio::spawn(async move {
+        let system_msg = ChatMessage {
+            role: "system".into(),
+            content: Some(
+                "You generate short, concise, descriptive session titles for a coding/chat app. \
+                 Generate a brief title (3 to 6 words maximum) summarizing the user's request. \
+                 Do NOT wrap in quotes. Do NOT add prefixes like 'Title:'. Respond ONLY with the title text."
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
 
-    let messages = vec![system_msg, user_msg];
+        let user_msg = ChatMessage {
+            role: "user".into(),
+            content: Some(user_message),
+            ..Default::default()
+        };
 
-    if let Ok(resp) = omniroute::chat_completion(cfg, "auto/fast", &messages, None).await {
-        if let Some(content) = resp.content {
-            let cleaned = clean_title(&content);
-            if !cleaned.is_empty() {
-                session.title = cleaned;
-                sessions::save_async(app_handle, session);
-                let _ = app_handle.emit(
-                    "agent://session-title-updated",
-                    SessionTitleUpdatedEvent {
-                        session_id: &session.id,
-                        title: &session.title,
-                    },
-                );
+        let messages = vec![system_msg, user_msg];
+
+        if let Ok(resp) = omniroute::chat_completion(&cfg, "auto/fast", &messages, None).await {
+            if let Some(content) = resp.content {
+                let cleaned = clean_title(&content);
+                if !cleaned.is_empty() {
+                    if let Some(mut session) = sessions::load(&app_handle, &session_id) {
+                        session.title = cleaned;
+                        sessions::save_async(&app_handle, &session);
+                        let _ = app_handle.emit(
+                            "agent://session-title-updated",
+                            SessionTitleUpdatedEvent {
+                                session_id: &session.id,
+                                title: &session.title,
+                            },
+                        );
+                    }
+                }
             }
         }
-    }
+    });
 }
 
 pub(crate) const MODEL: &str = "auto/coding";
@@ -717,7 +727,7 @@ async fn run_turn_inner(
     let mut session =
         sessions::load(app_handle, session_id).ok_or("Session not found")?;
 
-    maybe_auto_generate_title(app_handle, &cfg, &mut session, &user_message).await;
+    maybe_auto_generate_title(app_handle, &cfg, session_id, &session.title, &user_message);
 
     session.messages.push(ChatMessage {
         role: "user".into(),

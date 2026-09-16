@@ -1220,7 +1220,13 @@ pub async fn find_relevant_ai(
         ..Default::default()
     };
 
-    let Ok(resp) = crate::omniroute::chat_completion(cfg, "auto/fast", &[system, user], None).await else {
+    let res = tokio::time::timeout(
+        std::time::Duration::from_millis(2000),
+        crate::omniroute::chat_completion(cfg, "auto/fast", &[system, user], None),
+    )
+    .await;
+
+    let Ok(Ok(resp)) = res else {
         return vec![];
     };
     let Some(raw) = resp.content else { return vec![] };
