@@ -996,26 +996,34 @@ async fn run_turn_inner(
         }
 
         let mut call_signatures: Vec<(String, String)> = Vec::with_capacity(tool_calls.len());
-        for call in &tool_calls {
-            let tool_msg = handle_tool_call(
-                app_handle,
-                approvals.inner(),
-                stops,
-                stop_flag.clone(),
-                &session,
-                session_id,
-                call,
-                None,
-            )
-            .await;
+        let tool_futures = tool_calls.iter().map(|call| {
+            let app_handle = app_handle;
+            let approvals = approvals.inner();
+            let stops = stops;
+            let stop_flag = stop_flag.clone();
+            let session = &session;
+            let session_id = session_id;
+            async move {
+                handle_tool_call(
+                    app_handle,
+                    approvals,
+                    stops,
+                    stop_flag,
+                    session,
+                    session_id,
+                    call,
+                    None,
+                )
+                .await
+            }
+        });
 
+        let tool_msgs = futures_util::future::join_all(tool_futures).await;
+
+        for (call, tool_msg) in tool_calls.iter().zip(tool_msgs) {
             call_signatures.push((call.function.name.clone(), call.function.arguments.clone()));
             all_tool_names_this_turn.push(call.function.name.clone());
             session.messages.push(tool_msg);
-
-            if stop_flag.requested.load(Ordering::Relaxed) {
-                break;
-            }
         }
 
         // One signature per turn (reasoning text + every call it made this

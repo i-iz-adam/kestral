@@ -198,39 +198,43 @@ pub(crate) async fn run(
         }
 
         let mut call_signatures: Vec<(String, String)> = Vec::with_capacity(tool_calls.len());
-        for call in &tool_calls {
-            if call.function.name == "delegate_to_subagent" {
-                // Defensive only — this tool is never in tools_value above,
-                // so a well-behaved model won't request it. Refuse cleanly
-                // rather than recursing if one somehow does.
-                messages.push(ChatMessage {
-                    role: "tool".into(),
-                    content: Some("Sub-agents cannot delegate further.".into()),
-                    tool_call_id: Some(call.id.clone()),
-                    name: Some(call.function.name.clone()),
-                    ..Default::default()
-                });
-                continue;
+        let tool_futures = tool_calls.iter().map(|call| {
+            let app_handle = app_handle;
+            let approvals = approvals;
+            let stops = stops;
+            let stop_flag = stop_flag.clone();
+            let session = session;
+            let parent_call_id = parent_call_id;
+            async move {
+                if call.function.name == "delegate_to_subagent" {
+                    ChatMessage {
+                        role: "tool".into(),
+                        content: Some("Sub-agents cannot delegate further.".into()),
+                        tool_call_id: Some(call.id.clone()),
+                        name: Some(call.function.name.clone()),
+                        ..Default::default()
+                    }
+                } else {
+                    agent::handle_tool_call(
+                        app_handle,
+                        approvals,
+                        stops,
+                        stop_flag,
+                        session,
+                        &session.id,
+                        call,
+                        Some(parent_call_id),
+                    )
+                    .await
+                }
             }
+        });
 
-            let tool_msg = agent::handle_tool_call(
-                app_handle,
-                approvals,
-                stops,
-                stop_flag.clone(),
-                session,
-                &session.id,
-                call,
-                Some(parent_call_id),
-            )
-            .await;
+        let tool_msgs = futures_util::future::join_all(tool_futures).await;
 
+        for (call, tool_msg) in tool_calls.iter().zip(tool_msgs) {
             call_signatures.push((call.function.name.clone(), call.function.arguments.clone()));
             messages.push(tool_msg);
-
-            if stop_flag.is_requested() {
-                break;
-            }
         }
 
         // One signature per turn (reasoning text + every call it made this
