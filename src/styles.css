@@ -5613,6 +5613,10 @@ button.github-card:hover {
   animation: model-row-saved-flash 0.9s var(--ease) both;
 }
 
+.virtualized-model-list .model-row {
+  animation: none;
+}
+
 .model-row-radio {
   width: 14px;
   height: 14px;

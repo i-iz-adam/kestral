@@ -839,7 +839,7 @@ pub async fn resolve_image_model(cfg: &OmniRouteConfig, requested: Option<&str>)
             return first;
         }
     }
-    "openai/gpt-image-2".to_string()
+    "auto".to_string()
 }
 
 async fn fetch_image_url(url: &str) -> Result<Vec<u8>, String> {

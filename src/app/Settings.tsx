@@ -1,7 +1,16 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openShell } from "@tauri-apps/plugin-shell";
-import type { OmniRouteConfigPayload, SessionDefaults, ModelInfo, ModelsCache, ModelTestResult } from "../types";
+import type { OmniRouteConfigPayload, SessionDefaults, ModelInfo, ModelsCache } from "../types";
+import {
+  getOmniRouteConfig,
+  saveOmniRouteConfig,
+  fetchOmniRouteModels,
+  listImageModels,
+  setDefaultModel as apiSetDefaultModel,
+  setDefaultImageModel as apiSetDefaultImageModel,
+  testOmniRouteConnection,
+  testModel as apiTestModel,
+} from "./omnirouteApi";
 import GithubPanel from "./GithubPanel";
 import WorkspacePanel from "./WorkspacePanel";
 import UpdatesSection from "./UpdatesSection";
@@ -44,6 +53,199 @@ interface SettingsProps {
   initialTab?: SettingsTab;
 }
 
+interface VirtualModelListProps {
+  models: ModelInfo[];
+  activeModelId: string;
+  selectingModel: string | null;
+  justSavedModel: string | null;
+  modelsLoading: boolean;
+  modelSearch: string;
+  onSelectModel: (id: string) => void;
+}
+
+function VirtualModelList({
+  models,
+  activeModelId,
+  selectingModel,
+  justSavedModel,
+  modelsLoading,
+  modelSearch,
+  onSelectModel,
+}: VirtualModelListProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    }
+    setScrollTop(0);
+  }, [modelSearch, modelsLoading]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  };
+
+  const ITEM_HEIGHT = 44; // 38px button height + 6px gap
+  const CONTAINER_HEIGHT = 340;
+  const OVERSCAN = 6;
+
+  const totalHeight = models.length * ITEM_HEIGHT;
+  const startIndex = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - OVERSCAN);
+  const endIndex = Math.min(models.length, Math.ceil((scrollTop + CONTAINER_HEIGHT) / ITEM_HEIGHT) + OVERSCAN);
+  const offsetY = startIndex * ITEM_HEIGHT;
+  const visibleModels = models.slice(startIndex, endIndex);
+
+  return (
+    <div
+      ref={containerRef}
+      className="model-list virtualized-model-list"
+      onScroll={handleScroll}
+      style={{ height: `${CONTAINER_HEIGHT}px`, overflowY: "auto", position: "relative" }}
+    >
+      {modelsLoading ? (
+        Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="model-row-skeleton" style={{ animationDelay: `${i * 0.06}s` }} />
+        ))
+      ) : models.length === 0 ? (
+        <div className="model-list-empty">
+          {modelSearch
+            ? `No models matching "${modelSearch}"`
+            : "No models found yet — try refreshing."}
+        </div>
+      ) : (
+        <div style={{ height: `${totalHeight}px`, width: "100%", position: "relative" }}>
+          <div
+            style={{
+              transform: `translateY(${offsetY}px)`,
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+            }}
+          >
+            {visibleModels.map((m) => {
+              const isActive = m.id === activeModelId;
+              const isSelecting = selectingModel === m.id;
+              const justSaved = justSavedModel === m.id;
+              return (
+                <button
+                  key={m.id}
+                  className={`model-row ${isActive ? "active" : ""} ${justSaved ? "just-saved" : ""}`}
+                  onClick={() => onSelectModel(m.id)}
+                  disabled={isSelecting}
+                  style={{ height: "38px" }}
+                >
+                  <span className="model-row-radio" />
+                  <span className="model-row-id">{m.id}</span>
+                  {m.owned_by && <span className="model-row-owner">{m.owned_by}</span>}
+                  {isSelecting && <span className="mini-spinner" />}
+                  {isActive && !isSelecting && <span className="model-row-active-tag">Active</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface VirtualImageModelListProps {
+  models: string[];
+  activeModelId: string | null;
+  selectingModel: string | null;
+  justSavedModel: string | null;
+  modelsLoading: boolean;
+  modelSearch: string;
+  onSelectModel: (id: string) => void;
+}
+
+function VirtualImageModelList({
+  models,
+  activeModelId,
+  selectingModel,
+  justSavedModel,
+  modelsLoading,
+  modelSearch,
+  onSelectModel,
+}: VirtualImageModelListProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+    }
+    setScrollTop(0);
+  }, [modelSearch, modelsLoading]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  };
+
+  const ITEM_HEIGHT = 44;
+  const CONTAINER_HEIGHT = 220;
+  const OVERSCAN = 5;
+
+  const totalHeight = models.length * ITEM_HEIGHT;
+  const startIndex = Math.max(0, Math.floor(scrollTop / ITEM_HEIGHT) - OVERSCAN);
+  const endIndex = Math.min(models.length, Math.ceil((scrollTop + CONTAINER_HEIGHT) / ITEM_HEIGHT) + OVERSCAN);
+  const offsetY = startIndex * ITEM_HEIGHT;
+  const visibleModels = models.slice(startIndex, endIndex);
+
+  return (
+    <div
+      ref={containerRef}
+      className="model-list virtualized-model-list"
+      onScroll={handleScroll}
+      style={{ height: `${CONTAINER_HEIGHT}px`, overflowY: "auto", position: "relative" }}
+    >
+      {modelsLoading ? (
+        Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="model-row-skeleton" style={{ animationDelay: `${i * 0.06}s` }} />
+        ))
+      ) : models.length === 0 ? (
+        <div className="model-list-empty">
+          {modelSearch
+            ? `No image models matching "${modelSearch}"`
+            : "No image models found — configure an image provider in the Providers dashboard."}
+        </div>
+      ) : (
+        <div style={{ height: `${totalHeight}px`, width: "100%", position: "relative" }}>
+          <div
+            style={{
+              transform: `translateY(${offsetY}px)`,
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+            }}
+          >
+            {visibleModels.map((id) => {
+              const isActive = id === activeModelId;
+              const isSelecting = selectingModel === id;
+              const justSaved = justSavedModel === id;
+              return (
+                <button
+                  key={id}
+                  className={`model-row ${isActive ? "active" : ""} ${justSaved ? "just-saved" : ""}`}
+                  onClick={() => onSelectModel(id)}
+                  disabled={isSelecting}
+                  style={{ height: "38px" }}
+                >
+                  <span className="model-row-radio" />
+                  <span className="model-row-id">{id}</span>
+                  {isSelecting && <span className="mini-spinner" />}
+                  {isActive && !isSelecting && <span className="model-row-active-tag">Active</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState("");
@@ -82,13 +284,23 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   const [testMessage, setTestMessage] = useState<string | null>(null);
   const hasLoadedModelsOnce = useRef(false);
 
+  // ---- Image model picker ----
+  const [defaultImageModel, setDefaultImageModel] = useState<string | null>(null);
+  const [imageModels, setImageModels] = useState<string[]>([]);
+  const [imageModelsLoading, setImageModelsLoading] = useState(true);
+  const [imageModelsError, setImageModelsError] = useState<string | null>(null);
+  const [imageModelSearch, setImageModelSearch] = useState("");
+  const [selectingImageModel, setSelectingImageModel] = useState<string | null>(null);
+  const [justSavedImageModel, setJustSavedImageModel] = useState<string | null>(null);
+
   useEffect(() => {
-    invoke<OmniRouteConfigPayload | null>("get_omniroute_config").then((cfg) => {
+    getOmniRouteConfig().then((cfg) => {
       if (cfg) {
         setMode(cfg.mode);
         setRemoteUrl(cfg.remote_url ?? "");
         setApiKey(cfg.api_key ?? "");
         setDefaultModel(cfg.default_model ?? null);
+        setDefaultImageModel(cfg.default_image_model ?? null);
       }
     });
     invoke<{ command: string; args: string[]; auto_start: boolean }>("get_engine_config").then(
@@ -107,6 +319,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
     });
     checkPython();
     loadModelsOnOpen();
+    loadImageModels();
   }, []);
 
   const checkPython = () => {
@@ -122,12 +335,6 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
       });
   };
 
-  // Stale-while-revalidate: paint instantly from whatever's cached on
-  // disk (near-instant, no network round trip), then always kick off a
-  // background refresh so the list stays current. The refresh itself is
-  // a plain async `invoke` handled entirely on the Rust side, so it
-  // never blocks typing or navigation while it's in flight — only the
-  // very first launch, with nothing cached yet, shows a loading state.
   const loadModelsOnOpen = async () => {
     if (hasLoadedModelsOnce.current) return;
     hasLoadedModelsOnce.current = true;
@@ -138,11 +345,11 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
         setModelsFetchedAt(cache.fetched_at);
         setModelsLoading(false);
         if (Date.now() - cache.fetched_at < MODELS_STALE_MS) {
-          return; // fresh enough — skip the extra background round trip
+          return;
         }
       }
     } catch {
-      // no cache yet, fall through to a foreground fetch below
+      // no cache yet
     }
     refreshModels({ quiet: true });
   };
@@ -155,7 +362,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
     }
     setModelsError(null);
     try {
-      const res = await invoke<ModelsCache>("fetch_omniroute_models");
+      const res = await fetchOmniRouteModels();
       setModels(res.models);
       setModelsFetchedAt(res.fetched_at);
     } catch (e) {
@@ -164,6 +371,19 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
       setModelsLoading(false);
       setModelsSyncing(false);
       setModelsRefreshing(false);
+    }
+  };
+
+  const loadImageModels = async () => {
+    setImageModelsLoading(true);
+    setImageModelsError(null);
+    try {
+      const list = await listImageModels();
+      setImageModels(list);
+    } catch (e) {
+      setImageModelsError(typeof e === "string" ? e : "Couldn't load image models.");
+    } finally {
+      setImageModelsLoading(false);
     }
   };
 
@@ -179,13 +399,19 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
     );
   }, [models, modelSearch]);
 
+  const filteredImageModels = useMemo(() => {
+    const q = imageModelSearch.trim().toLowerCase();
+    if (!q) return imageModels;
+    return imageModels.filter((m) => m.toLowerCase().includes(q));
+  }, [imageModels, imageModelSearch]);
+
   const selectModel = async (id: string) => {
     if (id === activeModelId || selectingModel) return;
     setSelectingModel(id);
     setTestStatus("idle");
     setTestMessage(null);
     try {
-      await invoke("set_default_model", { model: id });
+      await apiSetDefaultModel(id);
       setDefaultModel(id);
       setJustSavedModel(id);
       setTimeout(() => setJustSavedModel((cur) => (cur === id ? null : cur)), 1100);
@@ -202,7 +428,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
     setTestStatus("idle");
     setTestMessage(null);
     try {
-      await invoke("set_default_model", { model: null });
+      await apiSetDefaultModel(null);
       setDefaultModel(null);
       setJustSavedModel(BUILTIN_DEFAULT_MODEL);
       setTimeout(() => setJustSavedModel((cur) => (cur === BUILTIN_DEFAULT_MODEL ? null : cur)), 1100);
@@ -213,12 +439,43 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
     }
   };
 
+  const selectImageModel = async (id: string) => {
+    if (id === defaultImageModel || selectingImageModel) return;
+    setSelectingImageModel(id);
+    setImageModelsError(null);
+    try {
+      await apiSetDefaultImageModel(id);
+      setDefaultImageModel(id);
+      setJustSavedImageModel(id);
+      setTimeout(() => setJustSavedImageModel((cur) => (cur === id ? null : cur)), 1100);
+    } catch (e) {
+      setImageModelsError(typeof e === "string" ? e : "Couldn't set image model.");
+    } finally {
+      setSelectingImageModel(null);
+    }
+  };
+
+  const resetImageModel = async () => {
+    if (!defaultImageModel || selectingImageModel === "__reset__") return;
+    setSelectingImageModel("__reset__");
+    setImageModelsError(null);
+    try {
+      await apiSetDefaultImageModel(null);
+      setDefaultImageModel(null);
+      setJustSavedImageModel(null);
+    } catch (e) {
+      setImageModelsError(typeof e === "string" ? e : "Couldn't reset image model.");
+    } finally {
+      setSelectingImageModel(null);
+    }
+  };
+
   const testActiveModel = async () => {
     if (testStatus === "testing") return;
     setTestStatus("testing");
     setTestMessage(null);
     try {
-      const res = await invoke<ModelTestResult>("test_model", { model: activeModelId });
+      const res = await apiTestModel(activeModelId);
       setTestStatus(res.ok ? "ok" : "fail");
       setTestMessage(res.message);
     } catch (e) {
@@ -231,18 +488,14 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
     mode,
     remote_url: mode === "remote" ? remoteUrl : null,
     api_key: mode === "remote" ? apiKey : null,
-    // Carried through so saving the connection settings never wipes out
-    // a default model chosen via the picker below — this button only
-    // ever touches mode/URL/key, but the backend struct is one record.
     default_model: defaultModel,
+    default_image_model: defaultImageModel,
   });
 
   const test = async () => {
     setStatus("testing");
     try {
-      const ok = await invoke<boolean>("test_omniroute_connection", {
-        config: buildConfig(),
-      });
+      const ok = await testOmniRouteConnection(buildConfig());
       setStatus(ok ? "ok" : "fail");
     } catch {
       setStatus("fail");
@@ -250,7 +503,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   };
 
   const save = async () => {
-    await invoke("save_omniroute_config", { config: buildConfig() });
+    await saveOmniRouteConfig(buildConfig());
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };
@@ -278,7 +531,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   };
 
   const tabs = [
-    { id: "omniroute" as const, label: "OmniRoute & Engine", icon: "🔌", keywords: "omniroute connection engine process mode local remote api key command args default model models picker search refresh test active reset" },
+    { id: "omniroute" as const, label: "OmniRoute & Engine", icon: "🔌", keywords: "omniroute connection engine process mode local remote api key command args default model models picker search refresh test active reset image generation" },
     { id: "defaults" as const, label: "Session Defaults", icon: "⚙️", keywords: "session defaults planning mode sub-agents subagents graceful stop" },
     { id: "github" as const, label: "GitHub Integration", icon: "🐙", keywords: "github token personal access token connect disconnect repo issues pull requests" },
     { id: "workspaces" as const, label: "Workspaces", icon: "📁", keywords: "workspaces folder directory project active workspace path add folder" },
@@ -424,40 +677,86 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
 
         {modelsError && <p className="fail model-error-msg">{modelsError}</p>}
 
-        <div className="model-list">
-          {modelsLoading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="model-row-skeleton" style={{ animationDelay: `${i * 0.06}s` }} />
-            ))
-          ) : filteredModels.length === 0 ? (
-            <div className="model-list-empty">
-              {modelSearch
-                ? `No models matching "${modelSearch}"`
-                : "No models found yet — try refreshing."}
-            </div>
-          ) : (
-            filteredModels.map((m, i) => {
-              const isActive = m.id === activeModelId;
-              const isSelecting = selectingModel === m.id;
-              const justSaved = justSavedModel === m.id;
-              return (
-                <button
-                  key={m.id}
-                  className={`model-row ${isActive ? "active" : ""} ${justSaved ? "just-saved" : ""}`}
-                  onClick={() => selectModel(m.id)}
-                  disabled={isSelecting}
-                  style={{ animationDelay: `${Math.min(i, 20) * 0.02}s` }}
-                >
-                  <span className="model-row-radio" />
-                  <span className="model-row-id">{m.id}</span>
-                  {m.owned_by && <span className="model-row-owner">{m.owned_by}</span>}
-                  {isSelecting && <span className="mini-spinner" />}
-                  {isActive && !isSelecting && <span className="model-row-active-tag">Active</span>}
-                </button>
-              );
-            })
-          )}
+        <VirtualModelList
+          models={filteredModels}
+          activeModelId={activeModelId}
+          selectingModel={selectingModel}
+          justSavedModel={justSavedModel}
+          modelsLoading={modelsLoading}
+          modelSearch={modelSearch}
+          onSelectModel={selectModel}
+        />
+      </section>
+
+      <section className="model-picker-section image-model-picker-section">
+        <div className="model-picker-header">
+          <h3>Image generation model</h3>
+          <div className="active-model-badge">
+            <span className="active-model-dot" />
+            <span className="active-model-label">Active:</span>
+            <strong>{defaultImageModel || "Auto-discover (First available)"}</strong>
+          </div>
         </div>
+        <p className="hint small">
+          Pick which image generation model tools send image prompts to. Choosing a model saves it right away.
+          If set to auto-discover, OmniRoute automatically uses the first working image provider.
+        </p>
+
+        <div className="model-picker-toolbar">
+          <div className="model-search-bar">
+            <svg className="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search image models..."
+              value={imageModelSearch}
+              onChange={(e) => setImageModelSearch(e.target.value)}
+            />
+            {imageModelSearch && (
+              <button className="search-clear-btn" onClick={() => setImageModelSearch("")}>
+                ✕
+              </button>
+            )}
+          </div>
+          <div className="model-toolbar-actions">
+            <button
+              className={`model-refresh-btn ${imageModelsLoading ? "spinning" : ""}`}
+              onClick={loadImageModels}
+              disabled={imageModelsLoading}
+              title="Refresh image models"
+            >
+              <svg className="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+                <path d="M21 2v6h-6" />
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M3 22v-6h6" />
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+              </svg>
+              {imageModelsLoading ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              className="small"
+              onClick={resetImageModel}
+              disabled={!defaultImageModel || selectingImageModel === "__reset__"}
+              title="Reset to auto-discovery mode"
+            >
+              Reset to auto
+            </button>
+          </div>
+        </div>
+
+        {imageModelsError && <p className="fail model-error-msg">{imageModelsError}</p>}
+
+        <VirtualImageModelList
+          models={filteredImageModels}
+          activeModelId={defaultImageModel}
+          selectingModel={selectingImageModel}
+          justSavedModel={justSavedImageModel}
+          modelsLoading={imageModelsLoading}
+          modelSearch={imageModelSearch}
+          onSelectModel={selectImageModel}
+        />
       </section>
 
       {mode === "local" && (
@@ -554,129 +853,80 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
 
   const renderWorkspacesSection = () => (
     <div className="settings-section-block">
+      <h2>Workspaces</h2>
       <WorkspacePanel />
     </div>
   );
 
   const renderSandboxSection = () => (
     <div className="settings-section-block">
-      <h2>Python Execution Sandbox</h2>
+      <h2>Python Sandbox</h2>
       <section>
-        <h3>Python Status</h3>
+        <h3>Execution environment</h3>
         <p className="hint small">
-          Status of Python installation for the <code>run_python</code> execution tool.
+          The <code>run_python</code> tool runs Python snippets in an isolated
+          subprocess.
         </p>
-        <div style={{ marginTop: 10 }}>
-          {checkingPython ? (
-            <span className="hint small">Checking Python status...</span>
-          ) : pythonStatus?.installed ? (
-            <div>
-              <span className="ok">Installed ({pythonStatus.version || pythonStatus.binary})</span>
-              <p className="hint small" style={{ marginTop: 4 }}>
-                The <code>run_python</code> tool is verified and enabled for agent use.
-              </p>
-            </div>
-          ) : (
-            <div>
-              <span className="fail">Not Installed</span>
-              <p className="hint small" style={{ marginTop: 4 }}>
-                The <code>run_python</code> tool is disabled until Python is verified on your system PATH.
-              </p>
-              <div className="row" style={{ marginTop: 8 }}>
-                <button onClick={() => openShell("https://www.python.org/downloads/")}>
-                  Download Python
-                </button>
-                <button onClick={checkPython}>Re-check Installation</button>
-              </div>
-            </div>
-          )}
+        <div className="field-group">
+          <label>Status</label>
+          <div className="row" style={{ alignItems: "center" }}>
+            {checkingPython ? (
+              <span className="hint">Checking...</span>
+            ) : pythonStatus?.installed ? (
+              <span className="ok">
+                Available ({pythonStatus.version || pythonStatus.binary})
+              </span>
+            ) : (
+              <span className="fail">Python not found on PATH</span>
+            )}
+            <button className="small" onClick={checkPython} disabled={checkingPython}>
+              Re-check
+            </button>
+          </div>
         </div>
       </section>
     </div>
   );
 
   const renderUpdatesSection = () => (
-    <UpdatesSection />
+    <div className="settings-section-block">
+      <h2>Updates & System</h2>
+      <UpdatesSection />
+    </div>
   );
-
-  const renderContentForTab = (tabId: SettingsTab) => {
-    switch (tabId) {
-      case "omniroute":
-        return renderOmniRouteSection();
-      case "defaults":
-        return renderDefaultsSection();
-      case "github":
-        return renderGithubSection();
-      case "workspaces":
-        return renderWorkspacesSection();
-      case "sandbox":
-        return renderSandboxSection();
-      case "updates":
-        return renderUpdatesSection();
-    }
-  };
 
   return (
     <div className="settings-layout">
-      <div className="settings-header">
-        <div className="settings-search-bar">
-          <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
+      <div className="settings-sidebar">
+        <div className="settings-search">
           <input
             type="text"
             placeholder="Search settings..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
-          {searchQuery && (
-            <button className="search-clear-btn" onClick={() => setSearchQuery("")}>
-              ✕
-            </button>
-          )}
         </div>
+        <nav className="settings-nav">
+          {filteredTabs.map((t) => (
+            <button
+              key={t.id}
+              className={`settings-nav-item ${activeTab === t.id ? "active" : ""}`}
+              onClick={() => setActiveTab(t.id)}
+            >
+              <span className="icon">{t.icon}</span>
+              <span className="label">{t.label}</span>
+            </button>
+          ))}
+        </nav>
       </div>
 
-      <div className="settings-body">
-        <div className="settings-nav">
-          {tabs.map((tab) => {
-            const isVisible = filteredTabs.some((t) => t.id === tab.id);
-            if (!isVisible && searchQuery.trim()) return null;
-            return (
-              <button
-                key={tab.id}
-                className={`settings-nav-item ${activeTab === tab.id && !searchQuery.trim() ? "active" : ""}`}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  if (searchQuery) setSearchQuery("");
-                }}
-              >
-                <span className="settings-nav-icon">{tab.icon}</span>
-                <span className="settings-nav-label">{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="settings-content">
-          {searchQuery.trim() ? (
-            filteredTabs.length > 0 ? (
-              filteredTabs.map((tab) => (
-                <div key={tab.id} className="search-result-group">
-                  <div className="search-result-category-badge">{tab.label}</div>
-                  {renderContentForTab(tab.id)}
-                </div>
-              ))
-            ) : (
-              <div className="settings-no-results">
-                <p className="hint">No settings found matching "{searchQuery}"</p>
-              </div>
-            )
-          ) : (
-            renderContentForTab(activeTab)
-          )}
-        </div>
+      <div className="settings-content">
+        {activeTab === "omniroute" && renderOmniRouteSection()}
+        {activeTab === "defaults" && renderDefaultsSection()}
+        {activeTab === "github" && renderGithubSection()}
+        {activeTab === "workspaces" && renderWorkspacesSection()}
+        {activeTab === "sandbox" && renderSandboxSection()}
+        {activeTab === "updates" && renderUpdatesSection()}
       </div>
     </div>
   );

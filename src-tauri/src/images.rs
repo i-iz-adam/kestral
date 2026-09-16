@@ -292,24 +292,45 @@ pub async fn execute(
         Some(model.clone()), Some(prompt.to_string()), None,
     );
 
-    let generated = match omniroute::generate_image(
+    let (generated, effective_model) = match omniroute::generate_image(
         &cfg, &model, prompt, Some(size.as_str()), Some(n), quality, style,
     )
     .await
     {
-        Ok(images) => images,
+        Ok(images) => (images, model.clone()),
         Err(e) => {
-            emit_progress(
-                app_handle, session_id, call_id, "error",
-                Some(model.clone()), None, Some(e.clone()),
-            );
-            return Err(e);
+            if model != "auto" {
+                emit_progress(
+                    app_handle, session_id, call_id, "rendering",
+                    Some("auto".to_string()), Some(prompt.to_string()), None,
+                );
+                match omniroute::generate_image(
+                    &cfg, "auto", prompt, Some(size.as_str()), Some(n), quality, style,
+                )
+                .await
+                {
+                    Ok(images) => (images, "auto".to_string()),
+                    Err(retry_err) => {
+                        emit_progress(
+                            app_handle, session_id, call_id, "error",
+                            Some(model.clone()), None, Some(retry_err.clone()),
+                        );
+                        return Err(retry_err);
+                    }
+                }
+            } else {
+                emit_progress(
+                    app_handle, session_id, call_id, "error",
+                    Some(model.clone()), None, Some(e.clone()),
+                );
+                return Err(e);
+            }
         }
     };
 
     emit_progress(
         app_handle, session_id, call_id, "saving",
-        Some(model.clone()), None, None,
+        Some(effective_model.clone()), None, None,
     );
 
     let dir = artifact_dir(app_handle, session_id)?;
