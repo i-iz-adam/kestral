@@ -717,6 +717,300 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     Ok(msg)
 }
 
+/// One image that came back from `/v1/images/generations`, already
+/// materialized as raw bytes regardless of whether the provider answered
+/// with inline base64 (`b64_json`) or a URL we had to go and fetch —
+/// callers shouldn't have to care which, and several of the providers
+/// OmniRoute fronts (OpenAI, xAI, Together/FLUX, Nebius, NanoBanana,
+/// local SD WebUI/ComfyUI) disagree about it.
+#[derive(Debug, Clone)]
+pub struct GeneratedImage {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+    /// Some providers rewrite the prompt before rendering and hand the
+    /// rewritten version back; worth surfacing, since it explains why the
+    /// result may not match what was asked for word for word.
+    pub revised_prompt: Option<String>,
+}
+
+/// Sniffs the container from the file's magic bytes rather than trusting
+/// a `Content-Type` (URL responses) or guessing PNG (base64 payloads,
+/// which carry no type at all) — this is what the saved file extension
+/// and the data: URL the UI renders are both derived from, so getting it
+/// wrong shows up as a broken image in the chat.
+fn sniff_image_mime(bytes: &[u8]) -> &'static str {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        "image/png"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.len() > 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else if bytes.starts_with(b"GIF8") {
+        "image/gif"
+    } else if bytes.starts_with(b"<svg") || bytes.starts_with(b"<?xml") {
+        "image/svg+xml"
+    } else {
+        "image/png"
+    }
+}
+
+pub fn mime_extension(mime: &str) -> &'static str {
+    match mime {
+        "image/jpeg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/svg+xml" => "svg",
+        _ => "png",
+    }
+}
+
+/// Image models advertised by this OmniRoute install, newest listing
+/// first. Used to pick a sensible default when neither the caller nor the
+/// saved config names one, so image generation works on a fresh install
+/// without a settings trip. `GET /v1/images/generations` is the documented
+/// listing endpoint; `/v1/models` is the fallback for older builds that
+/// only expose the combined catalog.
+pub async fn list_image_models(cfg: &OmniRouteConfig) -> Result<Vec<String>, String> {
+    let raw = match fetch_endpoint(cfg, "/v1/images/generations", None, None).await {
+        Ok(v) => v,
+        Err(_) => fetch_endpoint(cfg, "/v1/models", None, None).await?,
+    };
+
+    let list = raw
+        .get("data")
+        .or_else(|| raw.get("models"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .or_else(|| raw.as_array().cloned())
+        .unwrap_or_default();
+
+    let mut ids: Vec<String> = list
+        .iter()
+        .filter_map(|m| {
+            if let Some(id) = m.as_str() {
+                return Some(id.to_string());
+            }
+            let obj = m.as_object()?;
+            // When this came from the combined /v1/models catalog, keep
+            // only the image entries — a chat model id sent to
+            // /v1/images/generations is just a 400 later on.
+            if let Some(kind) = obj
+                .get("type")
+                .or_else(|| obj.get("modality"))
+                .or_else(|| obj.get("model_type"))
+                .and_then(|v| v.as_str())
+            {
+                if !kind.to_lowercase().contains("image") {
+                    return None;
+                }
+            }
+            obj.get("id")
+                .or_else(|| obj.get("name"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .collect();
+
+    ids.dedup();
+    if ids.is_empty() {
+        return Err("OmniRoute returned no image models — add an image provider (OpenAI, xAI, Together, Nebius, NanoBanana, SD WebUI, ComfyUI, …) in the Providers dashboard".to_string());
+    }
+    Ok(ids)
+}
+
+/// Picks the model to render with: an explicit request wins, then the
+/// saved default, then whatever the install actually has, then the
+/// documented example id as a last resort so the call produces a real
+/// provider error message rather than a local "nothing configured".
+pub async fn resolve_image_model(cfg: &OmniRouteConfig, requested: Option<&str>) -> String {
+    if let Some(m) = requested.map(str::trim).filter(|s| !s.is_empty()) {
+        return m.to_string();
+    }
+    if let Some(m) = cfg
+        .default_image_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return m.to_string();
+    }
+    if let Ok(models) = list_image_models(cfg).await {
+        if let Some(first) = models.into_iter().next() {
+            return first;
+        }
+    }
+    "openai/gpt-image-2".to_string()
+}
+
+async fn fetch_image_url(url: &str) -> Result<Vec<u8>, String> {
+    let resp = reqwest::Client::new()
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("failed to download generated image: {}", e))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "failed to download generated image: provider returned {}",
+            resp.status()
+        ));
+    }
+    resp.bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("failed to read generated image body: {}", e))
+}
+
+fn decode_b64_image(raw: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    // Providers occasionally hand back a full data: URL in the b64_json
+    // slot; strip the prefix rather than failing to decode it.
+    let payload = raw
+        .split_once(";base64,")
+        .map(|(_, tail)| tail)
+        .unwrap_or(raw)
+        .trim();
+    base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .map_err(|e| format!("provider returned base64 that wouldn't decode: {}", e))
+}
+
+/// Renders `prompt` via `POST /v1/images/generations`. `size` is passed
+/// through untouched (providers accept different sets — 1024x1024 is the
+/// safe common denominator), and `n` is how many variations to ask for.
+///
+/// Deliberately not retried the way chat completions are: image calls are
+/// slow and metered per image, so a silent retry risks paying twice for a
+/// request that may well have succeeded upstream. A failure comes straight
+/// back with the provider's own message so the model can adjust the prompt
+/// or the caller can pick a different provider.
+pub async fn generate_image(
+    cfg: &OmniRouteConfig,
+    model: &str,
+    prompt: &str,
+    size: Option<&str>,
+    n: Option<u64>,
+    quality: Option<&str>,
+    style: Option<&str>,
+) -> Result<Vec<GeneratedImage>, String> {
+    let base = base_url(cfg)?;
+    let url = format!("{}/v1/images/generations", base);
+
+    let mut body = serde_json::json!({
+        "model": model,
+        "prompt": prompt,
+        "size": size.unwrap_or("1024x1024"),
+        // Ask for inline base64 where the provider honors it — it saves a
+        // second round trip, and several providers' hosted URLs expire
+        // quickly enough that a slow save could miss them.
+        "response_format": "b64_json",
+    });
+    if let Some(count) = n.filter(|c| *c > 1) {
+        body["n"] = serde_json::json!(count);
+    }
+    if let Some(q) = quality.map(str::trim).filter(|s| !s.is_empty()) {
+        body["quality"] = serde_json::json!(q);
+    }
+    if let Some(s) = style.map(str::trim).filter(|s| !s.is_empty()) {
+        body["style"] = serde_json::json!(s);
+    }
+
+    let client = reqwest::Client::builder()
+        // A cold local SD WebUI/ComfyUI render can genuinely take minutes;
+        // reqwest's default has no timeout at all, which is worse — this
+        // bounds it without cutting off a legitimately slow provider.
+        .timeout(Duration::from_secs(600))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut req = client.post(&url).json(&body);
+    if let Some(key) = &cfg.api_key {
+        if !key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("failed to connect to OmniRoute image endpoint: {}", e))?;
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        let hint = match status.as_u16() {
+            404 => "\nNote: /v1/images/generations wasn't found — make sure OmniRoute is running and up to date.",
+            400 | 422 => "\nNote: the model id may not be an image model, or the requested size isn't one this provider accepts.",
+            401 | 403 => "\nNote: check the OmniRoute API key saved in Settings.",
+            429 => "\nNote: the image provider is rate limited or out of quota — try another provider in the Providers dashboard.",
+            _ => "",
+        };
+        return Err(format!(
+            "image generation failed (HTTP {}) on model {}: {}{}",
+            status, model, text, hint
+        ));
+    }
+
+    let json: Value = serde_json::from_str(&text).map_err(|e| {
+        let preview: String = text.chars().take(300).collect();
+        format!("could not decode image response: {} (preview: {:?})", e, preview)
+    })?;
+
+    let entries = json
+        .get("data")
+        .or_else(|| json.get("images"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .or_else(|| json.as_array().cloned())
+        .ok_or_else(|| {
+            let preview: String = text.chars().take(300).collect();
+            format!("image response had no data array (preview: {:?})", preview)
+        })?;
+
+    let mut out: Vec<GeneratedImage> = Vec::new();
+    for entry in &entries {
+        let revised_prompt = entry
+            .get("revised_prompt")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // An entry can be a bare base64/URL string, or an object keyed by
+        // any of several names depending on provider.
+        let inline = entry
+            .get("b64_json")
+            .or_else(|| entry.get("b64"))
+            .or_else(|| entry.get("image_base64"))
+            .or_else(|| entry.get("base64"))
+            .and_then(|v| v.as_str());
+        let link = entry
+            .get("url")
+            .or_else(|| entry.get("image_url"))
+            .and_then(|v| v.as_str())
+            .or_else(|| entry.as_str().filter(|s| s.starts_with("http")));
+
+        let bytes = if let Some(b64) = inline.or_else(|| entry.as_str().filter(|s| !s.starts_with("http"))) {
+            decode_b64_image(b64)?
+        } else if let Some(link) = link {
+            fetch_image_url(link).await?
+        } else {
+            continue;
+        };
+
+        if bytes.is_empty() {
+            continue;
+        }
+        let mime = sniff_image_mime(&bytes).to_string();
+        out.push(GeneratedImage { bytes, mime, revised_prompt });
+    }
+
+    if out.is_empty() {
+        return Err(format!(
+            "model {} returned a response with no usable image data",
+            model
+        ));
+    }
+    Ok(out)
+}
+
 pub async fn web_search(
     cfg: &OmniRouteConfig,
     query: &str,

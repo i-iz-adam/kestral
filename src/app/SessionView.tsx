@@ -11,6 +11,7 @@ import { buildHistoryTimeline } from "./historyTimeline";
 import { looksLikeSlashCommand, parseSlashCommand, filterSlashCommands, SLASH_HELP, type SlashCommandDef } from "./slashCommands";
 import SlashCommandMenu from "./SlashCommandMenu";
 import SkillLoadedCard from "./SkillLoadedCard";
+import ImageGenCard from "./ImageGenCard";
 import {
   ensureAgentEventsStarted,
   loadSession,
@@ -247,6 +248,9 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           onPromptFix={promptFix}
         />
       );
+    }
+    if (call.name === "generate_image") {
+      return <ImageGenCard key={call.call_id} event={call} onApprove={approve} />;
     }
     if (call.name === "edit_file" || call.name === "apply_patch") {
       return <DiffToolCard key={call.call_id} event={call} onApprove={approve} />;

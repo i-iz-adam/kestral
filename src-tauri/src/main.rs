@@ -5,6 +5,7 @@ mod config;
 mod context;
 mod engine;
 mod github;
+mod images;
 mod omniroute;
 mod plan;
 mod prompts;
@@ -591,6 +592,52 @@ fn save_engine_config(
     .map_err(|e| e.to_string())
 }
 
+// ---- generated images ----
+
+/// The image models this OmniRoute install can render with — for the
+/// picker in Settings, and for telling someone *why* generation failed
+/// when the answer is "no image provider is configured".
+#[tauri::command]
+async fn list_image_models(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let cfg = config::load_omniroute_config(&app_handle)
+        .ok_or("No OmniRoute config saved yet — finish setup first")?;
+    omniroute::list_image_models(&cfg).await
+}
+
+#[tauri::command]
+fn set_default_image_model(
+    app_handle: tauri::AppHandle,
+    model: Option<String>,
+) -> Result<config::OmniRouteConfig, String> {
+    config::set_default_image_model(&app_handle, model)
+}
+
+/// Re-reads a generated image off disk as a data: URL. Used when an old
+/// session is reopened — the session file only kept paths, so the cards
+/// repaint from here rather than from the live completion event.
+#[tauri::command]
+fn load_image_artifact(path: String) -> Result<images::ImageArtifact, String> {
+    images::load_artifact(&path)
+}
+
+/// Backs the artifact card's "Save" control: the frontend opens the
+/// native save dialog, then hands the chosen destination here.
+#[tauri::command]
+fn save_image_artifact(
+    source: Option<String>,
+    data_url: Option<String>,
+    destination: String,
+) -> Result<String, String> {
+    images::copy_artifact_to(source.as_deref(), data_url.as_deref(), &destination)
+}
+
+/// Backs "Copy" — the bytes come back base64 so the webview can rebuild
+/// a Blob and put a real image (not a file path) on the clipboard.
+#[tauri::command]
+fn read_image_artifact_base64(path: String) -> Result<String, String> {
+    images::artifact_base64(&path)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -665,6 +712,11 @@ fn main() {
             confirm_engine_running,
             get_engine_config,
             save_engine_config,
+            list_image_models,
+            set_default_image_model,
+            load_image_artifact,
+            save_image_artifact,
+            read_image_artifact_base64,
             updater::check_app_update,
             updater::download_and_install_update,
             updater::run_custom_installer

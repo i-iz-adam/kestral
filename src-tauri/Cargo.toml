@@ -19,6 +19,7 @@ tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 futures-util = "0.3"
 ignore = "0.4"
+base64 = "0.22"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
