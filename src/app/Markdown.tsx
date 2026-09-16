@@ -1,8 +1,8 @@
 import { useMemo, type MouseEvent } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { open } from "@tauri-apps/api/shell";
-import { convertFileSrc } from "@tauri-apps/api/tauri";
+import { open } from "@tauri-apps/plugin-shell";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 marked.setOptions({
   breaks: true,

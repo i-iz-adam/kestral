@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tauri::Manager;
 
 /// One entry in the setup wizard.
 ///
@@ -40,7 +41,7 @@ pub struct SetupState {
 
 fn state_path(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir");
     fs::create_dir_all(&dir).ok();

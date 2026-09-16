@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import Modal from "./Modal";
 import type { ToolCallEventPayload, GithubComment } from "../types";
 

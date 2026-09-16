@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use tauri::Manager;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GithubConfig {
@@ -11,7 +12,7 @@ pub struct GithubConfig {
 
 fn config_path(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir");
     fs::create_dir_all(&dir).ok();

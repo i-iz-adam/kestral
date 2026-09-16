@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tauri::Manager;
 use uuid::Uuid;
 
 use crate::omniroute::ChatMessage;
@@ -77,7 +78,7 @@ impl Session {
 
 fn sessions_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir")
         .join("sessions");

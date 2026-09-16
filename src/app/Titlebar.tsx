@@ -1,7 +1,8 @@
 import { useEffect, useState, MouseEvent } from "react";
-import { appWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export default function Titlebar() {
+  const appWindow = getCurrentWindow();
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {

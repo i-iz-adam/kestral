@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
+use tauri_plugin_opener::OpenerExt;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -132,7 +134,6 @@ pub async fn download_and_install_update(
     download_url: Option<String>,
 ) -> Result<bool, String> {
     use futures_util::StreamExt;
-    use tauri::Manager;
 
     let target_url = match download_url {
         Some(url) if !url.trim().is_empty() => url,
@@ -145,7 +146,7 @@ pub async fn download_and_install_update(
         }
     };
 
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "update-progress",
         InstallProgressPayload {
             stage: "init".to_string(),
@@ -166,7 +167,7 @@ pub async fn download_and_install_update(
         && !target_url.ends_with(".zip")
         && !target_url.contains("/download/")
     {
-        let _ = app_handle.emit_all(
+        let _ = app_handle.emit(
             "update-progress",
             InstallProgressPayload {
                 stage: "browser".to_string(),
@@ -175,7 +176,7 @@ pub async fn download_and_install_update(
                 completed: true,
             },
         );
-        tauri::api::shell::open(&app_handle.shell_scope(), &target_url, None)
+        app_handle.opener().open_url(&target_url, None::<&str>)
             .map_err(|e| format!("Failed to open release URL: {}", e))?;
         return Ok(true);
     }
@@ -229,7 +230,7 @@ pub async fn download_and_install_update(
     let mut downloaded: u64 = 0;
     let mut stream = res.bytes_stream();
 
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "update-progress",
         InstallProgressPayload {
             stage: "download".to_string(),
@@ -253,7 +254,7 @@ pub async fn download_and_install_update(
                 last_emitted_pct = pct;
                 let downloaded_mb = downloaded as f64 / 1_048_576.0;
                 let total_mb = total_size as f64 / 1_048_576.0;
-                let _ = app_handle.emit_all(
+                let _ = app_handle.emit(
                     "update-progress",
                     InstallProgressPayload {
                         stage: "download".to_string(),
@@ -273,7 +274,7 @@ pub async fn download_and_install_update(
         .map_err(|e| format!("Failed to flush downloaded file: {}", e))?;
     drop(file);
 
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "update-progress",
         InstallProgressPayload {
             stage: "verify".to_string(),
@@ -285,7 +286,7 @@ pub async fn download_and_install_update(
 
     tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
 
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "update-progress",
         InstallProgressPayload {
             stage: "launch".to_string(),
@@ -309,7 +310,7 @@ pub async fn download_and_install_update(
         let _ = std::process::Command::new(&temp_path).spawn();
     }
 
-    let _ = tauri::api::shell::open(&app_handle.shell_scope(), &path_str, None);
+    let _ = app_handle.opener().open_path(&path_str, None::<&str>);
 
     Ok(true)
 }
@@ -319,10 +320,9 @@ pub async fn run_custom_installer(
     app_handle: tauri::AppHandle,
     config: InstallerConfig,
 ) -> Result<bool, String> {
-    use tauri::Manager;
     use tokio::time::{sleep, Duration};
 
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "installer-progress",
         InstallProgressPayload {
             stage: "init".to_string(),
@@ -342,7 +342,7 @@ pub async fn run_custom_installer(
 
     let _ = std::fs::create_dir_all(&target_dir);
 
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "installer-progress",
         InstallProgressPayload {
             stage: "config".to_string(),
@@ -358,7 +358,7 @@ pub async fn run_custom_installer(
         let _ = std::fs::write(config_file, json_data);
     }
 
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "installer-progress",
         InstallProgressPayload {
             stage: "shortcuts".to_string(),
@@ -369,7 +369,7 @@ pub async fn run_custom_installer(
     );
     sleep(Duration::from_millis(400)).await;
 
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "installer-progress",
         InstallProgressPayload {
             stage: "finish".to_string(),

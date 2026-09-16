@@ -26,7 +26,7 @@
 //! instructions.
 
 use serde::Deserialize;
-use tauri::Manager;
+use tauri::Emitter;
 
 use crate::agent;
 use crate::config::OmniRouteConfig;
@@ -217,7 +217,7 @@ pub(crate) async fn maybe_reflect(
     };
 
     if let Ok(proposal_id) = skills::propose(app_handle, proposal) {
-        let _ = app_handle.emit_all(
+        let _ = app_handle.emit(
             "agent://skill-proposed",
             serde_json::json!({ "session_id": session.id, "proposal_id": proposal_id }),
         );

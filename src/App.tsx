@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import Wizard from "./setup/Wizard";
 import AppShell from "./app/AppShell";
 import Titlebar from "./app/Titlebar";

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
-import { open as openShell } from "@tauri-apps/api/shell";
+import { invoke } from "@tauri-apps/api/core";
+import { open as openShell } from "@tauri-apps/plugin-shell";
 import type { OmniRouteConfigPayload, SessionDefaults, ModelInfo, ModelsCache, ModelTestResult } from "../types";
 import GithubPanel from "./GithubPanel";
 import WorkspacePanel from "./WorkspacePanel";

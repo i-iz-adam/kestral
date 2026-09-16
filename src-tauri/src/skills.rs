@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
+use tauri::Manager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
@@ -159,7 +160,7 @@ struct SkillState {
 
 fn skills_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir")
         .join("skills");
@@ -233,7 +234,7 @@ pub fn read_agents_md(workspace: &str) -> Option<String> {
 
 fn proposals_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir")
         .join("skill_proposals");
@@ -243,7 +244,7 @@ fn proposals_dir(app_handle: &tauri::AppHandle) -> PathBuf {
 
 fn state_path(app_handle: &tauri::AppHandle) -> PathBuf {
     app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir")
         .join("skill_state.json")

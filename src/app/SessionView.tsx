@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import type { HistoryItem, ToolCallEventPayload, TimelineItem } from "../types";
 import GithubToolCard from "./GithubToolCard";
 import ToolCallRow from "./ToolCallRow";

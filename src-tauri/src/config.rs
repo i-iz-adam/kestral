@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use tauri::Manager;
 
 fn default_true() -> bool {
     true
@@ -72,7 +73,7 @@ pub struct OmniRouteConfig {
 
 fn app_config_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir");
     fs::create_dir_all(&dir).ok();

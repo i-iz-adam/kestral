@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// One entry in a session's plan. Status is a plain string rather than an
 /// enum so a future status value from a newer app version doesn't fail to
@@ -57,7 +57,7 @@ pub fn tool_definitions() -> Value {
 
 fn plans_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let dir = app_handle
-        .path_resolver()
+        .path()
         .app_config_dir()
         .expect("could not resolve app config dir")
         .join("plans");
@@ -130,7 +130,7 @@ pub fn maybe_execute(app_handle: &tauri::AppHandle, session_id: &str, name: &str
     if let Err(e) = save(app_handle, session_id, &items) {
         return Some(Err(e));
     }
-    let _ = app_handle.emit_all(
+    let _ = app_handle.emit(
         "agent://plan-updated",
         json!({ "session_id": session_id, "items": items }),
     );

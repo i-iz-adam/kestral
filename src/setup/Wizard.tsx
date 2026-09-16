@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { stepComponents } from "./stepRegistry";
 import type { SetupStepDef } from "./types";
 
