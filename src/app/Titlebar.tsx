@@ -63,6 +63,8 @@ export default function Titlebar() {
   };
 
   const handleMouseDown = async (e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest(".titlebar-controls")) return;
     if (e.button === 0 && e.detail === 1) {
       try {
         await appWindow.startDragging();
