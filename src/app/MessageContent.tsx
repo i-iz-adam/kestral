@@ -1,5 +1,37 @@
 import { useEffect, useState } from "react";
 import Markdown from "./Markdown";
+import ImageArtifactCard from "./ImageArtifactCard";
+import type { ImageArtifact } from "../types";
+
+/** Wraps a bare image reference from a message (`images: string[]` —
+ * either a data: URL from an attachment or a path) in the shape the
+ * artifact card renders, so an image the assistant replies with gets the
+ * same copy/save/expand controls as a freshly generated one instead of
+ * being a dead <img>. */
+function asArtifact(ref: string, idx: number): ImageArtifact {
+  const isData = ref.startsWith("data:");
+  const mimeMatch = isData ? /^data:([^;]+)/.exec(ref) : null;
+  const extMatch = !isData ? /\.([a-z0-9]+)$/i.exec(ref) : null;
+  const ext = extMatch?.[1]?.toLowerCase();
+  const mime =
+    mimeMatch?.[1] ??
+    (ext === "jpg" || ext === "jpeg"
+      ? "image/jpeg"
+      : ext === "webp"
+        ? "image/webp"
+        : ext === "gif"
+          ? "image/gif"
+          : ext === "svg"
+            ? "image/svg+xml"
+            : "image/png");
+  return {
+    path: isData ? "" : ref,
+    name: isData ? `image-${idx + 1}.${mime.split("/")[1] ?? "png"}` : (ref.split(/[/\\]/).pop() || ref),
+    mime,
+    data_url: ref,
+    bytes: 0,
+  };
+}
 
 interface ThinkSplit {
   thinking: string;
@@ -88,6 +120,13 @@ export default function MessageContent({
 
   return (
     <>
+      {images && images.length > 0 && (
+        <div className={"message-image-artifacts" + (images.length > 1 ? " multi" : "")}>
+          {images.map((img, idx) => (
+            <ImageArtifactCard key={idx} artifact={asArtifact(img, idx)} />
+          ))}
+        </div>
+      )}
       {thinking && (
         <div className={"thinking-block" + (thinkingOpen ? " active" : "")}>
           <button type="button" className="thinking-toggle" onClick={() => setExpanded((v) => !v)}>

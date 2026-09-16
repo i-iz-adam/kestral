@@ -109,6 +109,51 @@ export interface OmniRouteConfigPayload {
   remote_url: string | null;
   api_key: string | null;
   default_model?: string | null;
+  default_image_model?: string | null;
+}
+
+/** One rendered image, as the backend hands it over: `data_url` for
+ * painting right now, `path` for everything that outlives this turn
+ * (saving, copying, repainting a reopened session). */
+export interface ImageArtifact {
+  path: string;
+  name: string;
+  mime: string;
+  data_url: string;
+  bytes: number;
+  revised_prompt?: string | null;
+}
+
+/** Stages a generate_image call moves through, emitted on
+ * `agent://image-progress`. The card animates against these rather than
+ * a percentage — there's no honest progress number to report for a
+ * single opaque provider call, so the stages carry the information and
+ * the animation carries the sense of motion. */
+export type ImageGenStage =
+  | "resolving"
+  | "dispatched"
+  | "rendering"
+  | "saving"
+  | "done"
+  | "error";
+
+export interface ImageProgressEventPayload {
+  session_id: string;
+  call_id: string;
+  stage: ImageGenStage;
+  model?: string | null;
+  prompt?: string | null;
+  message?: string | null;
+}
+
+export interface ImageReadyEventPayload {
+  session_id: string;
+  call_id: string;
+  model: string;
+  prompt: string;
+  title: string;
+  size: string;
+  images: ImageArtifact[];
 }
 
 export interface ModelInfo {

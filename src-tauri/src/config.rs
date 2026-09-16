@@ -69,6 +69,13 @@ pub struct OmniRouteConfig {
     /// back cleanly instead of erroring.
     #[serde(default)]
     pub default_model: Option<String>,
+    /// The image model `generate_image` renders with. `None`/empty means
+    /// "ask OmniRoute what image models exist and take the first" (see
+    /// omniroute::resolve_image_model) — so a fresh install can generate
+    /// images without a settings trip, and an install with several
+    /// providers can pin a preferred one.
+    #[serde(default)]
+    pub default_image_model: Option<String>,
 }
 
 fn app_config_dir(app_handle: &tauri::AppHandle) -> PathBuf {
@@ -109,6 +116,20 @@ pub fn set_default_model(
     let mut cfg = load_omniroute_config(app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
     cfg.default_model = model.filter(|m| !m.trim().is_empty());
+    save_omniroute_config(app_handle, &cfg).map_err(|e| e.to_string())?;
+    Ok(cfg)
+}
+
+/// Same as `set_default_model`, for the image model `generate_image`
+/// uses. Kept as its own setter for the same reason: the image-model
+/// picker has no business round-tripping the connection fields.
+pub fn set_default_image_model(
+    app_handle: &tauri::AppHandle,
+    model: Option<String>,
+) -> Result<OmniRouteConfig, String> {
+    let mut cfg = load_omniroute_config(app_handle)
+        .ok_or("No OmniRoute config saved yet — finish setup first")?;
+    cfg.default_image_model = model.filter(|m| !m.trim().is_empty());
     save_omniroute_config(app_handle, &cfg).map_err(|e| e.to_string())?;
     Ok(cfg)
 }

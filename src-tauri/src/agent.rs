@@ -10,6 +10,7 @@ use tokio::sync::{oneshot, Notify};
 use crate::config;
 use crate::context;
 use crate::github;
+use crate::images;
 use crate::omniroute::{self, ChatMessage, ToolCall};
 use crate::plan;
 use crate::prompts;
@@ -410,7 +411,10 @@ pub(crate) fn is_mutating(name: &str) -> bool {
 }
 
 pub(crate) fn is_mutating_call(name: &str, args: &Value) -> bool {
-    tools::is_mutating_with_args(name, args) || github::is_mutating(name) || skills::is_mutating(name)
+    tools::is_mutating_with_args(name, args)
+        || github::is_mutating(name)
+        || skills::is_mutating(name)
+        || images::is_mutating_with_args(name, args)
 }
 
 pub(crate) fn emit_tool_event(
@@ -506,6 +510,12 @@ pub(crate) async fn execute_tool(
         let token = github::load_token(app_handle)
             .ok_or("GitHub is not connected — add a token in the GitHub tab first")?;
         return github::execute(&token, &session.workspace, name, args).await;
+    }
+    if name == "generate_image" {
+        // Kept out of the spawn_blocking tail below: this is an async HTTP
+        // call that emits its own progress events as it goes (see
+        // images.rs), which is what the chat card animates against.
+        return images::execute(app_handle, session, call_id, args).await;
     }
     if name == "web_search" || name == "web_fetch" {
         let cfg = config::load_omniroute_config(app_handle)
@@ -760,9 +770,16 @@ async fn run_turn_inner(
         // this turn's tool list whenever coding mode is — the addendum
         // explaining how to use them belongs here for the same reason
         // SUBAGENT_DELEGATION_ADDENDUM is conditional on subagents_enabled.
-        let mut prompt = format!("{}
+        let mut prompt = format!(
+            "{}
 
-{}", prompts::CODING_SYSTEM_PROMPT, prompts::SKILL_AUTHORING_ADDENDUM);
+{}
+
+{}",
+            prompts::CODING_SYSTEM_PROMPT,
+            prompts::SKILL_AUTHORING_ADDENDUM,
+            prompts::IMAGE_GENERATION_ADDENDUM
+        );
         if session.subagents_enabled {
             prompt = format!("{}
 
@@ -780,6 +797,7 @@ async fn run_turn_inner(
             .unwrap_or_default();
         all.extend(skills::tool_definitions().as_array().cloned().unwrap_or_default());
         all.extend(plan::tool_definitions().as_array().cloned().unwrap_or_default());
+        all.extend(images::tool_definitions().as_array().cloned().unwrap_or_default());
         if github::load_token(app_handle).is_some() {
             all.extend(github::tool_definitions().as_array().cloned().unwrap_or_default());
         }

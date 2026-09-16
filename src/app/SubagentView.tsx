@@ -4,6 +4,7 @@ import PlanDrawer from "./PlanDrawer";
 import GithubToolCard from "./GithubToolCard";
 import ToolCallRow from "./ToolCallRow";
 import DiffToolCard from "./DiffToolCard";
+import ImageGenCard from "./ImageGenCard";
 import SkillLoadedCard from "./SkillLoadedCard";
 import MessageContent from "./MessageContent";
 
@@ -106,6 +107,9 @@ export default function SubagentView({
                 onPromptFix={onPromptFix}
               />
             );
+          }
+          if (c.name === "generate_image") {
+            return <ImageGenCard key={c.call_id} event={c} onApprove={onApprove} />;
           }
           if (c.name === "edit_file" || c.name === "apply_patch") {
             return <DiffToolCard key={c.call_id} event={c} onApprove={onApprove} />;

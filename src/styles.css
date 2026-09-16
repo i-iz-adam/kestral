@@ -7119,3 +7119,527 @@ button.github-card:hover {
   50% { box-shadow: 0 0 20px 4px var(--accent-glow); }
 }
 
+
+/* ---- Image generation: the forge (in-flight) and the artifact (result) ----
+
+   The palette here reuses the existing two-hue logic: arcane violet while
+   something is happening, gold the moment it's finished. The in-flight
+   frame is built from four stacked layers inside one box — a slow plasma
+   bloom (the image "coming into focus"), a faint grid that reads as a
+   canvas, a develop-beam that sweeps down it, and drifting motes — so the
+   whole thing is GPU-composited transforms and opacity, with no JS
+   driving any frame. Everything collapses to a single quiet pulse under
+   prefers-reduced-motion at the bottom of this block. */
+
+.image-gen-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  padding: 10px 12px 12px;
+  margin: 6px 0;
+  animation: tool-row-in 0.35s var(--ease) both;
+  position: relative;
+  overflow: hidden;
+}
+
+.image-gen-card.working {
+  border-color: var(--border-soft);
+  box-shadow: 0 0 0 1px rgba(155, 107, 255, 0.08), 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.image-gen-card.done {
+  border-color: rgba(224, 180, 92, 0.28);
+}
+
+.image-gen-card.error {
+  border-color: rgba(242, 102, 90, 0.4);
+}
+
+.image-gen-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.image-gen-icon {
+  display: inline-flex;
+  color: var(--accent-soft);
+}
+
+.image-gen-card.done .image-gen-icon {
+  color: var(--gold);
+}
+
+.image-gen-label {
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.image-gen-count,
+.image-gen-size {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.image-gen-approve {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.image-gen-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f9a49b;
+  white-space: pre-wrap;
+}
+
+.image-gen-revised {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+/* ---- the forge ---- */
+
+.image-forge {
+  margin-top: 10px;
+}
+
+.image-forge-frame {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: radial-gradient(120% 120% at 50% 20%, #241c3c 0%, #120e20 60%, #0b0813 100%);
+  isolation: isolate;
+}
+
+/* Two counter-rotating, differently-scaled colour blooms. Reads as an
+   image resolving out of nothing rather than as a spinner. */
+.image-forge-plasma {
+  position: absolute;
+  inset: -25%;
+  background:
+    radial-gradient(38% 38% at 30% 35%, rgba(155, 107, 255, 0.55), transparent 70%),
+    radial-gradient(34% 34% at 70% 60%, rgba(224, 180, 92, 0.35), transparent 70%),
+    radial-gradient(45% 45% at 55% 25%, rgba(94, 214, 255, 0.22), transparent 72%);
+  filter: blur(26px);
+  animation: forge-plasma 7s var(--ease-breathe) infinite;
+}
+
+@keyframes forge-plasma {
+  0% { transform: rotate(0deg) scale(1); opacity: 0.75; }
+  35% { transform: rotate(60deg) scale(1.15); opacity: 1; }
+  70% { transform: rotate(-40deg) scale(1.05); opacity: 0.8; }
+  100% { transform: rotate(0deg) scale(1); opacity: 0.75; }
+}
+
+.image-forge-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(236, 231, 245, 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(236, 231, 245, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(circle at 50% 50%, #000 40%, transparent 85%);
+  animation: forge-grid 6s linear infinite;
+}
+
+@keyframes forge-grid {
+  0% { opacity: 0.35; background-position: 0 0; }
+  50% { opacity: 0.7; }
+  100% { opacity: 0.35; background-position: 28px 28px; }
+}
+
+/* The develop-beam: a bright scan line with a soft trailing wash, the way
+   a print comes up in a tray. Deliberately slow (2.6s) — a fast sweep
+   reads as "loading bar", a slow one reads as "being made". */
+.image-forge-beam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 34%;
+  top: -34%;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(183, 148, 255, 0.1) 55%,
+    rgba(236, 231, 245, 0.55) 92%,
+    rgba(236, 231, 245, 0.9) 100%
+  );
+  box-shadow: 0 2px 18px rgba(183, 148, 255, 0.55);
+  animation: forge-beam 2.6s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+
+@keyframes forge-beam {
+  0% { top: -34%; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+.image-forge-motes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.image-forge-motes i {
+  position: absolute;
+  bottom: -6px;
+  left: calc(8% + (var(--i) * 12.5%));
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  box-shadow: 0 0 8px var(--accent-glow);
+  opacity: 0;
+  animation: forge-mote 4.2s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 0.55s);
+}
+
+@keyframes forge-mote {
+  0% { transform: translateY(0) scale(0.6); opacity: 0; }
+  20% { opacity: 0.9; }
+  100% { transform: translateY(-190px) translateX(14px) scale(1.1); opacity: 0; }
+}
+
+/* Rotating conic edge-light, clipped to a 1px inset ring. */
+.image-forge-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  padding: 1px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--accent) 40deg,
+    var(--gold) 90deg,
+    transparent 150deg,
+    transparent 360deg
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  animation: forge-ring 3.4s linear infinite;
+}
+
+@keyframes forge-ring {
+  to { transform: rotate(360deg); }
+}
+
+.image-forge-status {
+  margin-top: 10px;
+  max-width: 420px;
+}
+
+.image-forge-track {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.image-forge-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.45;
+  transition: opacity 0.3s var(--ease), color 0.3s var(--ease);
+}
+
+.image-forge-step i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.image-forge-step.complete {
+  opacity: 0.9;
+  color: var(--gold);
+}
+
+.image-forge-step.complete i {
+  opacity: 1;
+  box-shadow: 0 0 6px var(--gold-glow);
+}
+
+.image-forge-step.active {
+  opacity: 1;
+  color: var(--accent-soft);
+}
+
+.image-forge-step.active i {
+  opacity: 1;
+  animation: forge-step-pulse 1.4s var(--ease-breathe) infinite;
+}
+
+@keyframes forge-step-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 var(--accent-glow); }
+  50% { transform: scale(1.35); box-shadow: 0 0 10px 2px var(--accent-glow); }
+}
+
+.image-forge-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.image-forge-elapsed {
+  opacity: 0.7;
+}
+
+.image-forge-prompt {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---- the finished artifact ---- */
+
+.image-gen-results {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.image-gen-results.multi,
+.message-image-artifacts.multi {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.message-image-artifacts {
+  margin: 4px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.image-artifact {
+  margin: 0;
+  max-width: 460px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  animation: artifact-reveal 0.55s var(--ease) both;
+}
+
+.image-gen-results.multi .image-artifact,
+.message-image-artifacts.multi .image-artifact {
+  max-width: none;
+}
+
+/* Lands like something that just finished rather than something that
+   faded in: a short rise with a gold edge-flash that decays away. */
+@keyframes artifact-reveal {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+    box-shadow: 0 0 0 1px var(--gold-glow), 0 0 26px var(--gold-glow);
+  }
+  60% { opacity: 1; }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    box-shadow: var(--shadow-sm);
+  }
+}
+
+.image-artifact.broken {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.image-artifact-frame {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: #0b0813;
+  cursor: zoom-in;
+  position: relative;
+  line-height: 0;
+  overflow: hidden;
+}
+
+.image-artifact-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  transition: transform 0.5s var(--ease);
+}
+
+.image-artifact-frame:hover img {
+  transform: scale(1.015);
+}
+
+/* A single diagonal highlight that crosses the image once on hover —
+   enough to say "this is a thing you can act on", not a permanent
+   overlay competing with the picture. */
+.image-artifact-sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 35%,
+    rgba(236, 231, 245, 0.14) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  transition: transform 0.7s var(--ease);
+  pointer-events: none;
+}
+
+.image-artifact-frame:hover .image-artifact-sheen {
+  transform: translateX(100%);
+}
+
+.image-artifact-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.image-artifact-labels {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.image-artifact-caption {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+.image-artifact-meta {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.8;
+}
+
+.image-artifact-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.artifact-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: color 0.18s var(--ease), background 0.18s var(--ease),
+    border-color 0.18s var(--ease), transform 0.18s var(--ease-spring);
+}
+
+.artifact-action:hover {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+.artifact-action:active {
+  transform: scale(0.94);
+}
+
+.artifact-action.busy {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.artifact-action.confirmed {
+  color: var(--gold);
+  border-color: rgba(224, 180, 92, 0.35);
+  background: var(--gold-dim);
+}
+
+.artifact-action.failed {
+  color: var(--danger);
+  border-color: rgba(242, 102, 90, 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-forge-plasma,
+  .image-forge-grid,
+  .image-forge-beam,
+  .image-forge-motes i,
+  .image-forge-ring,
+  .image-forge-step.active i {
+    animation: none;
+  }
+  .image-forge-beam {
+    top: 33%;
+    opacity: 0.5;
+  }
+  .image-forge-frame {
+    animation: forge-quiet-pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes forge-quiet-pulse {
+    0%, 100% { opacity: 0.75; }
+    50% { opacity: 1; }
+  }
+  .image-artifact,
+  .image-gen-card {
+    animation: none;
+  }
+  .image-artifact-frame:hover img,
+  .image-artifact-sheen {
+    transition: none;
+  }
+}
