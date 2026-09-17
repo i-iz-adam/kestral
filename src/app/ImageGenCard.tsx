@@ -2,13 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ImageArtifact,
+  ImageGenMode,
   ImageGenStage,
   ImageProgressEventPayload,
   ImageReadyEventPayload,
   ToolCallEventPayload,
 } from "../types";
 import ImageArtifactCard from "./ImageArtifactCard";
-import { loadArtifactsFromPaths, parseArtifactPaths } from "./imageArtifacts";
+import {
+  loadArtifactsFromPaths,
+  parseArtifactPaths,
+  parseSourcePath,
+} from "./imageArtifacts";
 
 /** The stages shown as a little three-step track while a render is in
  * flight. Deliberately not a percentage: a provider call is one opaque
@@ -17,6 +22,15 @@ import { loadArtifactsFromPaths, parseArtifactPaths } from "./imageArtifacts";
 const STAGE_TRACK: { id: ImageGenStage; label: string }[] = [
   { id: "resolving", label: "Choosing model" },
   { id: "rendering", label: "Rendering" },
+  { id: "saving", label: "Saving" },
+];
+
+/** The edit path's first stage is finding the image to work on, which is
+ * the step most likely to fail (and the one worth naming, since "which
+ * image?" is the question a user would ask). */
+const EDIT_STAGE_TRACK: { id: ImageGenStage; label: string }[] = [
+  { id: "resolving", label: "Finding source" },
+  { id: "rendering", label: "Editing" },
   { id: "saving", label: "Saving" },
 ];
 
@@ -48,26 +62,41 @@ function aspectFromSize(size: string | undefined): number {
 function ForgeFrame({
   aspect,
   stage,
+  mode,
+  sourceDataUrl,
   model,
   prompt,
   elapsed,
 }: {
   aspect: number;
   stage: ImageGenStage;
+  mode: ImageGenMode;
+  sourceDataUrl?: string | null;
   model?: string | null;
   prompt?: string | null;
   elapsed: number;
 }) {
   const activeIndex = STAGE_ORDER[stage] ?? 0;
+  const editing = mode === "edit";
+  const track = editing ? EDIT_STAGE_TRACK : STAGE_TRACK;
 
   return (
     <div className="image-forge">
       <div
-        className="image-forge-frame"
-        style={{ aspectRatio: String(aspect) }}
+        className={"image-forge-frame" + (editing && sourceDataUrl ? " editing" : "")}
+        // An edit keeps the source's own proportions; only a generation
+        // has a requested size to shape the frame by.
+        style={editing && sourceDataUrl ? undefined : { aspectRatio: String(aspect) }}
         role="img"
-        aria-label="Generating image"
+        aria-label={editing ? "Editing image" : "Generating image"}
       >
+        {/* During an edit the source sits under the effects, so what you
+            watch is this image being worked on rather than an empty box —
+            the whole point of the edit path is that it's the same
+            picture, and the animation should say so. */}
+        {editing && sourceDataUrl && (
+          <img className="image-forge-source" src={sourceDataUrl} alt="" aria-hidden="true" />
+        )}
         <span className="image-forge-plasma" aria-hidden="true" />
         <span className="image-forge-grid" aria-hidden="true" />
         <span className="image-forge-beam" aria-hidden="true" />
@@ -81,7 +110,7 @@ function ForgeFrame({
 
       <div className="image-forge-status">
         <div className="image-forge-track">
-          {STAGE_TRACK.map((s, idx) => (
+          {track.map((s, idx) => (
             <span
               key={s.id}
               className={
@@ -118,7 +147,14 @@ export default function ImageGenCard({
     size?: string;
     model?: string;
     n?: number;
+    source?: string;
+    mask?: string;
   };
+
+  // The tool name is the mode: known before any event arrives, which
+  // matters for a reopened session (no live events will ever come) and
+  // for the first paint of a live one.
+  const mode: ImageGenMode = event.name === "edit_image" ? "edit" : "generate";
 
   const [stage, setStage] = useState<ImageGenStage>(() =>
     event.status === "done" ? "done" : event.status === "error" ? "error" : "resolving"
@@ -127,9 +163,10 @@ export default function ImageGenCard({
   const [artifacts, setArtifacts] = useState<ImageArtifact[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [sourceDataUrl, setSourceDataUrl] = useState<string | null>(null);
 
   const aspect = useMemo(() => aspectFromSize(args.size), [args.size]);
-  const caption = args.title || args.prompt || "Generated image";
+  const caption = args.title || args.prompt || (mode === "edit" ? "Edited image" : "Generated image");
 
   // Both events are per-call, so this card only listens for its own
   // call_id. Keeping it local (rather than threading image state through
@@ -145,7 +182,13 @@ export default function ImageGenCard({
       if (evt.payload.call_id !== event.call_id) return;
       setStage(evt.payload.stage);
       if (evt.payload.model) setModel(evt.payload.model);
-      if (evt.payload.stage === "error") setFailure(evt.payload.message ?? "Image generation failed");
+      if (evt.payload.source_data_url) setSourceDataUrl(evt.payload.source_data_url);
+      if (evt.payload.stage === "error") {
+        setFailure(
+          evt.payload.message ??
+            (mode === "edit" ? "Image edit failed" : "Image generation failed")
+        );
+      }
     }).then((un) => {
       if (cancelled) un();
       else unlistenProgress = un;
@@ -155,6 +198,7 @@ export default function ImageGenCard({
       if (evt.payload.call_id !== event.call_id) return;
       setArtifacts(evt.payload.images);
       setModel(evt.payload.model);
+      if (evt.payload.source_data_url) setSourceDataUrl(evt.payload.source_data_url);
       setStage("done");
     }).then((un) => {
       if (cancelled) un();
@@ -166,7 +210,7 @@ export default function ImageGenCard({
       unlistenProgress?.();
       unlistenReady?.();
     };
-  }, [event.call_id]);
+  }, [event.call_id, mode]);
 
   // Rehydration path: a session reopened after a restart has the tool
   // result (which carries the saved paths) but never saw the live
@@ -188,12 +232,31 @@ export default function ImageGenCard({
     };
   }, [event.status, event.result, artifacts.length]);
 
+  // Same rehydration story for the "before" image: an edit's source was
+  // copied into the artifact directory precisely so the pair survives a
+  // restart.
+  useEffect(() => {
+    if (mode !== "edit" || sourceDataUrl) return;
+    if (event.status !== "done" || !event.result) return;
+    const path = parseSourcePath(event.result);
+    if (!path) return;
+    let cancelled = false;
+    loadArtifactsFromPaths([path]).then((loaded) => {
+      if (!cancelled && loaded.length > 0) setSourceDataUrl(loaded[0].data_url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, sourceDataUrl, event.status, event.result]);
+
   useEffect(() => {
     if (event.status === "error" && !failure) {
       setStage("error");
-      setFailure(event.result ?? "Image generation failed");
+      setFailure(
+        event.result ?? (mode === "edit" ? "Image edit failed" : "Image generation failed")
+      );
     }
-  }, [event.status, event.result, failure]);
+  }, [event.status, event.result, failure, mode]);
 
   const inFlight = stage !== "done" && stage !== "error" && event.status !== "error";
 
@@ -219,15 +282,29 @@ export default function ImageGenCard({
           </svg>
         </span>
         <span className="image-gen-label">
-          {inFlight ? "Generating image" : stage === "error" ? "Image generation failed" : "Image"}
+          {inFlight
+            ? mode === "edit"
+              ? "Editing image"
+              : "Generating image"
+            : stage === "error"
+              ? mode === "edit"
+                ? "Image edit failed"
+                : "Image generation failed"
+              : mode === "edit"
+                ? "Edited image"
+                : "Image"}
         </span>
         {args.n && args.n > 1 && <span className="image-gen-count">×{args.n}</span>}
         {args.size && <span className="image-gen-size">{args.size}</span>}
+        {mode === "edit" && args.mask && <span className="image-gen-size">masked</span>}
       </div>
 
       {awaiting && (
         <div className="image-gen-approve">
-          <span>This render also writes into the workspace.</span>
+          <span>
+              {mode === "edit" ? "This edit" : "This render"} also writes into the
+              workspace.
+            </span>
           <div className="tool-approve">
             <button onClick={() => onApprove(event.call_id, true)}>Approve</button>
             <button onClick={() => onApprove(event.call_id, false)}>Reject</button>
@@ -239,6 +316,8 @@ export default function ImageGenCard({
         <ForgeFrame
           aspect={aspect}
           stage={stage}
+          mode={mode}
+          sourceDataUrl={sourceDataUrl}
           model={model}
           prompt={args.prompt}
           elapsed={elapsed}
@@ -250,15 +329,39 @@ export default function ImageGenCard({
       )}
 
       {artifacts.length > 0 && (
-        <div className={"image-gen-results" + (artifacts.length > 1 ? " multi" : "")}>
-          {artifacts.map((artifact, idx) => (
-            <ImageArtifactCard
-              key={artifact.path}
-              artifact={artifact}
-              caption={artifacts.length > 1 ? `${caption} (${idx + 1})` : caption}
-              meta={[model, args.size].filter(Boolean).join(" · ")}
-            />
-          ))}
+        <div className="image-gen-outcome">
+          {/* Before/after, because the question a person actually has
+              about an edit is "what changed?" — and the source is already
+              in hand, so showing it costs nothing. Only the result gets
+              the artifact toolbar: the source is context, not a new
+              artifact to save. */}
+          {mode === "edit" && sourceDataUrl && (
+            <div className="image-edit-source">
+              <span className="image-edit-source-label">Before</span>
+              <img src={sourceDataUrl} alt="Source image" />
+            </div>
+          )}
+          <div
+            className={
+              "image-gen-results" +
+              (artifacts.length > 1 ? " multi" : "") +
+              (mode === "edit" && sourceDataUrl ? " after" : "")
+            }
+          >
+            {mode === "edit" && sourceDataUrl && (
+              <span className="image-edit-after-label">After</span>
+            )}
+            {artifacts.map((artifact, idx) => (
+              <ImageArtifactCard
+                key={artifact.path}
+                artifact={artifact}
+                caption={artifacts.length > 1 ? `${caption} (${idx + 1})` : caption}
+                meta={[model, mode === "edit" ? "edited" : args.size]
+                  .filter(Boolean)
+                  .join(" · ")}
+              />
+            ))}
+          </div>
         </div>
       )}
 

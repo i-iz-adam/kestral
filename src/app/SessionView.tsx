@@ -249,7 +249,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         />
       );
     }
-    if (call.name === "generate_image") {
+    if (call.name === "generate_image" || call.name === "edit_image") {
       return <ImageGenCard key={call.call_id} event={call} onApprove={approve} />;
     }
     if (call.name === "edit_file" || call.name === "apply_patch") {

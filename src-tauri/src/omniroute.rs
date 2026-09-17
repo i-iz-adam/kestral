@@ -950,7 +950,15 @@ pub async fn generate_image(
         ));
     }
 
-    let json: Value = serde_json::from_str(&text).map_err(|e| {
+    parse_image_response(&text, model).await
+}
+
+/// Turns an image response body into bytes, shared by the generation and
+/// edit paths — both endpoints answer in the same OpenAI Images shape, and
+/// the shape is the part every provider disagrees about, so there's only
+/// one place to fix when a new one turns up.
+async fn parse_image_response(text: &str, model: &str) -> Result<Vec<GeneratedImage>, String> {
+    let json: Value = serde_json::from_str(text).map_err(|e| {
         let preview: String = text.chars().take(300).collect();
         format!("could not decode image response: {} (preview: {:?})", e, preview)
     })?;
@@ -1009,6 +1017,132 @@ pub async fn generate_image(
         ));
     }
     Ok(out)
+}
+
+/// One image going *into* an edit: the bytes, what they are, and the
+/// filename the multipart part is labelled with. Providers key validation
+/// off the part's filename extension and content type (OpenAI's edit
+/// endpoint outright rejects a part it reads as anything but png/jpeg/webp),
+/// so both travel with the bytes rather than being guessed at send time.
+#[derive(Debug, Clone)]
+pub struct SourceImage {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+    pub filename: String,
+}
+
+impl SourceImage {
+    pub fn new(bytes: Vec<u8>, stem: &str) -> Self {
+        let mime = sniff_image_mime(&bytes).to_string();
+        let filename = format!("{}.{}", stem, mime_extension(&mime));
+        SourceImage { bytes, mime, filename }
+    }
+}
+
+/// Edits an existing image via `POST /v1/images/edits` — the multipart
+/// endpoint, because the source image (and optional mask) are file parts,
+/// not JSON fields.
+///
+/// This is a genuinely different operation from generation, not a
+/// convenience wrapper: the provider receives the actual pixels and is
+/// asked to change them, which is why "make this cat look shocked"
+/// preserves *this* cat instead of inventing a new one. `prompt` here
+/// describes the change (and the result), not the whole scene from
+/// scratch.
+///
+/// `mask`, when given, marks the region to repaint: transparent pixels are
+/// the editable area, opaque pixels are kept. Without one the provider
+/// edits the whole image guided by the prompt.
+///
+/// Extra `sources` beyond the first are sent as additional `image[]` parts
+/// for the providers that accept multiple references (gpt-image style);
+/// providers that don't simply ignore them.
+pub async fn edit_image(
+    cfg: &OmniRouteConfig,
+    model: &str,
+    prompt: &str,
+    sources: &[SourceImage],
+    mask: Option<&SourceImage>,
+    size: Option<&str>,
+    n: Option<u64>,
+) -> Result<Vec<GeneratedImage>, String> {
+    if sources.is_empty() {
+        return Err("no source image to edit".to_string());
+    }
+
+    let base = base_url(cfg)?;
+    let url = format!("{}/v1/images/edits", base);
+
+    let mut form = reqwest::multipart::Form::new()
+        .text("model", model.to_string())
+        .text("prompt", prompt.to_string())
+        .text("response_format", "b64_json");
+
+    if let Some(s) = size.map(str::trim).filter(|s| !s.is_empty()) {
+        form = form.text("size", s.to_string());
+    }
+    if let Some(count) = n.filter(|c| *c > 1) {
+        form = form.text("n", count.to_string());
+    }
+
+    for (idx, source) in sources.iter().enumerate() {
+        let part = reqwest::multipart::Part::bytes(source.bytes.clone())
+            .file_name(source.filename.clone())
+            .mime_str(&source.mime)
+            .map_err(|e| format!("invalid source image type {}: {}", source.mime, e))?;
+        // Single source goes in as `image` (what every implementation
+        // accepts); additional ones as `image[]`, which is the multi-
+        // reference shape and is ignored by providers that don't do it.
+        form = if idx == 0 {
+            form.part("image", part)
+        } else {
+            form.part("image[]", part)
+        };
+    }
+
+    if let Some(mask) = mask {
+        let part = reqwest::multipart::Part::bytes(mask.bytes.clone())
+            .file_name(mask.filename.clone())
+            .mime_str(&mask.mime)
+            .map_err(|e| format!("invalid mask type {}: {}", mask.mime, e))?;
+        form = form.part("mask", part);
+    }
+
+    let mut req = get_http_client().post(&url).multipart(form);
+    if let Some(key) = &cfg.api_key {
+        if !key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("failed to connect to OmniRoute image edit endpoint: {}", e))?;
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        // The hints matter more here than on the generation path: most
+        // failures are "this provider/model can't edit at all", and the
+        // caller's correct response is to fall back to generation rather
+        // than to reword the prompt.
+        let hint = match status.as_u16() {
+            404 => "\nNote: /v1/images/edits wasn't found — this OmniRoute build may predate the edit endpoint. Fall back to generating a fresh image.",
+            400 | 422 => "\nNote: this model may not support editing, or may require a square PNG source. Try a gpt-image-class model, or fall back to generating a fresh image.",
+            401 | 403 => "\nNote: check the OmniRoute API key saved in Settings.",
+            413 => "\nNote: the source image is too large for this provider — downscale it and retry.",
+            429 => "\nNote: the image provider is rate limited or out of quota.",
+            _ => "",
+        };
+        return Err(format!(
+            "image edit failed (HTTP {}) on model {}: {}{}",
+            status, model, text, hint
+        ));
+    }
+
+    parse_image_response(&text, model).await
 }
 
 pub async fn web_search(

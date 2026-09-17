@@ -108,7 +108,7 @@ export default function SubagentView({
               />
             );
           }
-          if (c.name === "generate_image") {
+          if (c.name === "generate_image" || c.name === "edit_image") {
             return <ImageGenCard key={c.call_id} event={c} onApprove={onApprove} />;
           }
           if (c.name === "edit_file" || c.name === "apply_patch") {

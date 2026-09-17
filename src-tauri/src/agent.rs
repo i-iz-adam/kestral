@@ -511,11 +511,11 @@ pub(crate) async fn execute_tool(
             .ok_or("GitHub is not connected — add a token in the GitHub tab first")?;
         return github::execute(&token, &session.workspace, name, args).await;
     }
-    if name == "generate_image" {
+    if name == "generate_image" || name == "edit_image" {
         // Kept out of the spawn_blocking tail below: this is an async HTTP
         // call that emits its own progress events as it goes (see
         // images.rs), which is what the chat card animates against.
-        return images::execute(app_handle, session, call_id, args).await;
+        return images::execute(app_handle, session, name, call_id, args).await;
     }
     if name == "web_search" || name == "web_fetch" {
         let cfg = config::load_omniroute_config(app_handle)

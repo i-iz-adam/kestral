@@ -14,7 +14,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.11", features = ["json", "stream"] }
+# `multipart` is needed by the image *edit* path — /v1/images/edits
+# takes the source image (and optional mask) as form parts, not JSON.
+reqwest = { version = "0.11", features = ["json", "stream", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 futures-util = "0.3"

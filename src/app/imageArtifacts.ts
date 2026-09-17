@@ -154,6 +154,19 @@ export function parseArtifactPaths(result: string | undefined | null): string[] 
   return paths;
 }
 
+/** Pulls the pre-edit source path out of a persisted edit_image result
+ * (the `source: <path>` line). Deliberately not a `- ` bullet on the
+ * backend side, so `parseArtifactPaths` never mistakes the original for
+ * one of the outputs. */
+export function parseSourcePath(result: string | undefined | null): string | null {
+  if (!result) return null;
+  for (const line of result.split("\n")) {
+    const match = /^\s*source:\s+(\S.*)$/i.exec(line);
+    if (match) return match[1].trim();
+  }
+  return null;
+}
+
 export function formatBytes(bytes: number): string {
   if (!bytes) return "";
   if (bytes < 1024) return `${bytes} B`;

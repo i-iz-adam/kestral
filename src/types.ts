@@ -137,18 +137,29 @@ export type ImageGenStage =
   | "done"
   | "error";
 
+/** Generation renders from nothing; editing reworks pixels that already
+ * exist. The card needs to know which from the first event, because an
+ * edit shows the source image being worked on rather than an empty
+ * frame. */
+export type ImageGenMode = "generate" | "edit";
+
 export interface ImageProgressEventPayload {
   session_id: string;
   call_id: string;
   stage: ImageGenStage;
+  mode?: ImageGenMode | null;
   model?: string | null;
   prompt?: string | null;
   message?: string | null;
+  /** The image being edited, as a data: URL — edit path only. */
+  source_data_url?: string | null;
 }
 
 export interface ImageReadyEventPayload {
   session_id: string;
   call_id: string;
+  mode?: ImageGenMode | null;
+  source_data_url?: string | null;
   model: string;
   prompt: string;
   title: string;

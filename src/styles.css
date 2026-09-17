@@ -7647,3 +7647,121 @@ button.github-card:hover {
     transition: none;
   }
 }
+
+/* ---- Image editing: source-in-frame while working, before/after after ----
+
+   An edit reuses the forge animation, but over the actual source image
+   instead of an empty frame — the point of the edit path is that it's the
+   same picture, so the animation should read as that picture being worked
+   on. The plasma/beam layers already sit above whatever is in the frame,
+   so the only addition is the image itself plus a dimming so the effects
+   stay legible over arbitrary photo content. */
+
+.image-forge-frame.editing {
+  /* No fixed aspect ratio here: the source's own proportions win, since
+     an edit returns something shaped like its input. */
+  max-width: 420px;
+}
+
+.image-forge-source {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: saturate(0.75) brightness(0.62) contrast(0.95);
+  /* A slow breathing blur reads as "being reworked" rather than "still
+     loading" — the image is clearly present, just unsettled. */
+  animation: forge-source-work 3.8s var(--ease-breathe) infinite;
+}
+
+@keyframes forge-source-work {
+  0%, 100% { filter: saturate(0.75) brightness(0.62) contrast(0.95) blur(0px); }
+  50% { filter: saturate(0.95) brightness(0.72) contrast(1.02) blur(1.6px); }
+}
+
+.image-forge-frame.editing .image-forge-plasma {
+  /* Dialled back over real content — at generation strength it washes the
+     source out and defeats the purpose of showing it. */
+  opacity: 0.55;
+  mix-blend-mode: screen;
+}
+
+.image-forge-frame.editing .image-forge-grid {
+  opacity: 0.25;
+}
+
+.image-gen-outcome {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+/* The source is context, not a deliverable: smaller, quieter, no toolbar.
+   The result keeps the full artifact treatment. */
+.image-edit-source {
+  position: relative;
+  flex: 0 0 auto;
+  width: 128px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  opacity: 0.82;
+  transition: opacity 0.2s var(--ease);
+}
+
+.image-edit-source:hover {
+  opacity: 1;
+}
+
+.image-edit-source img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.image-edit-source-label,
+.image-edit-after-label {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 2px 6px;
+}
+
+.image-edit-source-label {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
+  border-radius: 999px;
+  background: rgba(11, 8, 19, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.image-edit-after-label {
+  padding: 0 0 2px;
+  color: var(--gold);
+}
+
+.image-gen-results.after {
+  flex: 1 1 240px;
+  min-width: 220px;
+}
+
+@media (max-width: 620px) {
+  .image-gen-outcome {
+    flex-direction: column;
+  }
+  .image-edit-source {
+    width: 96px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-forge-source {
+    animation: none;
+  }
+}
