@@ -2,6 +2,7 @@
 
 mod agent;
 mod config;
+mod connections;
 mod context;
 mod engine;
 mod github;
@@ -384,6 +385,60 @@ fn approve_tool_call(
 // ---- github ----
 
 #[tauri::command]
+fn get_connections(app_handle: tauri::AppHandle) -> Vec<connections::Connection> {
+    connections::load_connections(&app_handle)
+}
+
+#[tauri::command]
+async fn save_connection(
+    app_handle: tauri::AppHandle,
+    connection: connections::Connection,
+) -> Result<connections::Connection, String> {
+    let mut list = connections::load_connections(&app_handle);
+    let mut tested = connections::test_connection(connection).await;
+    tested.updated_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    if let Some(idx) = list.iter().position(|c| c.id == tested.id) {
+        list[idx] = tested.clone();
+    } else {
+        if tested.created_at == 0 {
+            tested.created_at = tested.updated_at;
+        }
+        list.push(tested.clone());
+    }
+
+    connections::save_connections(&app_handle, &list)?;
+    Ok(tested)
+}
+
+#[tauri::command]
+fn delete_connection(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+    let mut list = connections::load_connections(&app_handle);
+    list.retain(|c| c.id != id);
+    connections::save_connections(&app_handle, &list)
+}
+
+#[tauri::command]
+async fn test_connection(connection: connections::Connection) -> Result<connections::Connection, String> {
+    Ok(connections::test_connection(connection).await)
+}
+
+#[tauri::command]
+async fn execute_integration_action(
+    app_handle: tauri::AppHandle,
+    connection_name: String,
+    action: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    connections::execute_connection_action(&app_handle, &connection_name, &action, args).await
+}
+
+// ---- github ----
+
+#[tauri::command]
 fn save_github_token(app_handle: tauri::AppHandle, token: String) -> Result<(), String> {
     github::save_token(&app_handle, &token).map_err(|e| e.to_string())
 }
@@ -688,6 +743,11 @@ fn main() {
             send_message,
             stop_session,
             approve_tool_call,
+            get_connections,
+            save_connection,
+            delete_connection,
+            test_connection,
+            execute_integration_action,
             save_github_token,
             get_github_token,
             test_github_token,

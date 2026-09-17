@@ -3,6 +3,17 @@ export interface PlanItem {
   status: string;
 }
 
+export interface Connection {
+  id: string;
+  type: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+  status: "connected" | "disconnected" | "error" | "untested";
+  account_name?: string | null;
+  config: Record<string, string>;
+}
+
 export interface SessionDefaults {
   planning_enabled: boolean;
   subagents_enabled: boolean;

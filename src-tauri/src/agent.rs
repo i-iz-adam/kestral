@@ -8,6 +8,7 @@ use tauri::Emitter;
 use tokio::sync::{oneshot, Notify};
 
 use crate::config;
+use crate::connections;
 use crate::context;
 use crate::github;
 use crate::images;
@@ -506,6 +507,14 @@ pub(crate) async fn execute_tool(
     if let Some(result) = skills::maybe_execute(app_handle, name, args, workspace) {
         return result;
     }
+    if name == "integration_action" {
+        let conn_name = args.get("connection_name").and_then(|v| v.as_str()).unwrap_or("");
+        let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        let action_args = args.get("args").cloned().unwrap_or(Value::Object(Default::default()));
+        return connections::execute_connection_action(app_handle, conn_name, action, action_args)
+            .await
+            .map(|v| serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string()));
+    }
     if name.starts_with("github_") {
         let token = github::load_token(app_handle)
             .ok_or("GitHub is not connected — add a token in the GitHub tab first")?;
@@ -785,6 +794,18 @@ async fn run_turn_inner(
 
 {}", prompt, prompts::SUBAGENT_DELEGATION_ADDENDUM);
         }
+
+        let active_connections = connections::load_connections(app_handle);
+        if !active_connections.is_empty() {
+            let mut conn_summary = String::from("\n\nActive Integrations & Named Connections:\n");
+            for c in &active_connections {
+                let acct = c.account_name.as_deref().unwrap_or("configured");
+                conn_summary.push_str(&format!("- \"{}\" (Type: {}, Account: {})\n", c.name, c.r#type, acct));
+            }
+            conn_summary.push_str("When the user asks to use a connection by name (e.g., 'Using The Magician, create a role for moderators'), call integration_action with connection_name matching that exact name.");
+            prompt.push_str(&conn_summary);
+        }
+
         prompt
     };
 
@@ -798,7 +819,11 @@ async fn run_turn_inner(
         all.extend(skills::tool_definitions().as_array().cloned().unwrap_or_default());
         all.extend(plan::tool_definitions().as_array().cloned().unwrap_or_default());
         all.extend(images::tool_definitions().as_array().cloned().unwrap_or_default());
-        if github::load_token(app_handle).is_some() {
+        let active_conns = connections::load_connections(app_handle);
+        if !active_conns.is_empty() {
+            all.extend(connections::tool_definitions().as_array().cloned().unwrap_or_default());
+        }
+        if github::load_token(app_handle).is_some() || active_conns.iter().any(|c| c.r#type == "github") {
             all.extend(github::tool_definitions().as_array().cloned().unwrap_or_default());
         }
         if session.subagents_enabled {

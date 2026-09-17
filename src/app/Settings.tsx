@@ -11,7 +11,7 @@ import {
   testOmniRouteConnection,
   testModel as apiTestModel,
 } from "./omnirouteApi";
-import GithubPanel from "./GithubPanel";
+import IntegrationsPanel from "./IntegrationsPanel";
 import WorkspacePanel from "./WorkspacePanel";
 import UpdatesSection from "./UpdatesSection";
 
@@ -533,7 +533,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   const tabs = [
     { id: "omniroute" as const, label: "OmniRoute & Engine", icon: "🔌", keywords: "omniroute connection engine process mode local remote api key command args default model models picker search refresh test active reset image generation" },
     { id: "defaults" as const, label: "Session Defaults", icon: "⚙️", keywords: "session defaults planning mode sub-agents subagents graceful stop" },
-    { id: "github" as const, label: "GitHub Integration", icon: "🐙", keywords: "github token personal access token connect disconnect repo issues pull requests" },
+    { id: "github" as const, label: "Integrations & Connections", icon: "🌐", keywords: "integrations connections github discord bot the magician token slack telegram notion linear webhook postgres" },
     { id: "workspaces" as const, label: "Workspaces", icon: "📁", keywords: "workspaces folder directory project active workspace path add folder" },
     { id: "sandbox" as const, label: "Python Sandbox", icon: "🐍", keywords: "python sandbox execution environment run_python binary path" },
     { id: "updates" as const, label: "Updates & System", icon: "🚀", keywords: "updates installer application version check for updates rerun installer" },
@@ -846,8 +846,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
 
   const renderGithubSection = () => (
     <div className="settings-section-block">
-      <h2>GitHub Integration</h2>
-      <GithubPanel />
+      <IntegrationsPanel />
     </div>
   );
 
