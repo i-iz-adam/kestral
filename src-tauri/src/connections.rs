@@ -353,6 +353,167 @@ fn encode_emoji(emoji: &str) -> String {
         .collect()
 }
 
+pub fn perm_flag_from_name(name: &str) -> Option<u64> {
+    match name.trim().to_uppercase().as_str() {
+        "CREATE_INSTANT_INVITE" | "CREATE_INVITE" => Some(1 << 0),
+        "KICK_MEMBERS" => Some(1 << 1),
+        "BAN_MEMBERS" => Some(1 << 2),
+        "ADMINISTRATOR" | "ADMIN" => Some(1 << 3),
+        "MANAGE_CHANNELS" => Some(1 << 4),
+        "MANAGE_GUILD" | "MANAGE_SERVER" => Some(1 << 5),
+        "ADD_REACTIONS" => Some(1 << 6),
+        "VIEW_AUDIT_LOG" => Some(1 << 7),
+        "PRIORITY_SPEAKER" => Some(1 << 8),
+        "STREAM" | "VIDEO" => Some(1 << 9),
+        "VIEW_CHANNEL" | "READ_MESSAGES" => Some(1 << 10),
+        "SEND_MESSAGES" => Some(1 << 11),
+        "SEND_TTS_MESSAGES" => Some(1 << 12),
+        "MANAGE_MESSAGES" => Some(1 << 13),
+        "EMBED_LINKS" => Some(1 << 14),
+        "ATTACH_FILES" => Some(1 << 15),
+        "READ_MESSAGE_HISTORY" => Some(1 << 16),
+        "MENTION_EVERYONE" => Some(1 << 17),
+        "USE_EXTERNAL_EMOJIS" => Some(1 << 18),
+        "VIEW_GUILD_INSIGHTS" => Some(1 << 19),
+        "CONNECT" => Some(1 << 20),
+        "SPEAK" => Some(1 << 21),
+        "MUTE_MEMBERS" => Some(1 << 22),
+        "DEAFEN_MEMBERS" => Some(1 << 23),
+        "MOVE_MEMBERS" => Some(1 << 24),
+        "USE_VAD" => Some(1 << 25),
+        "CHANGE_NICKNAME" => Some(1 << 26),
+        "MANAGE_NICKNAMES" => Some(1 << 27),
+        "MANAGE_ROLES" => Some(1 << 28),
+        "MANAGE_WEBHOOKS" => Some(1 << 29),
+        "MANAGE_GUILD_EXPRESSIONS" | "MANAGE_EMOJIS_AND_STICKERS" => Some(1 << 30),
+        "USE_APPLICATION_COMMANDS" | "USE_SLASH_COMMANDS" => Some(1 << 31),
+        "REQUEST_TO_SPEAK" => Some(1 << 32),
+        "MANAGE_EVENTS" => Some(1 << 33),
+        "MANAGE_THREADS" => Some(1 << 34),
+        "CREATE_PUBLIC_THREADS" => Some(1 << 35),
+        "CREATE_PRIVATE_THREADS" => Some(1 << 36),
+        "USE_EXTERNAL_STICKERS" => Some(1 << 37),
+        "SEND_MESSAGES_IN_THREADS" => Some(1 << 38),
+        "USE_EMBEDDED_ACTIVITIES" => Some(1 << 39),
+        "MODERATE_MEMBERS" | "TIMEOUT_MEMBERS" => Some(1 << 40),
+        "VIEW_CREATOR_MONETIZATION_ANALYTICS" => Some(1 << 41),
+        "USE_SOUNDBOARD" => Some(1 << 42),
+        _ => None,
+    }
+}
+
+pub fn parse_permission_value(val: Option<&Value>) -> String {
+    let val = match val {
+        Some(v) => v,
+        None => return "0".to_string(),
+    };
+
+    if let Some(n) = val.as_u64() {
+        return n.to_string();
+    }
+
+    if let Some(s) = val.as_str() {
+        let s_trimmed = s.trim();
+        if let Ok(n) = s_trimmed.parse::<u64>() {
+            return n.to_string();
+        }
+        let mut bits: u64 = 0;
+        for token in s_trimmed.split(&[',', '|', ' '][..]) {
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            if let Ok(n) = token.parse::<u64>() {
+                bits |= n;
+            } else if let Some(flag) = perm_flag_from_name(token) {
+                bits |= flag;
+            }
+        }
+        return bits.to_string();
+    }
+
+    if let Some(arr) = val.as_array() {
+        let mut bits: u64 = 0;
+        for elem in arr {
+            if let Some(n) = elem.as_u64() {
+                bits |= n;
+            } else if let Some(s) = elem.as_str() {
+                let s_trimmed = s.trim();
+                if let Ok(n) = s_trimmed.parse::<u64>() {
+                    bits |= n;
+                } else if let Some(flag) = perm_flag_from_name(s_trimmed) {
+                    bits |= flag;
+                }
+            }
+        }
+        return bits.to_string();
+    }
+
+    "0".to_string()
+}
+
+pub fn parse_permission_overwrites(val: Option<&Value>) -> Option<Vec<Value>> {
+    let arr = val?.as_array()?;
+    let mut overwrites = Vec::new();
+    for item in arr {
+        let id = item
+            .get("id")
+            .or_else(|| item.get("role_id"))
+            .or_else(|| item.get("user_id"))
+            .and_then(|v| v.as_str());
+        if let Some(id_str) = id {
+            let o_type = match item.get("type") {
+                Some(v) if v.as_u64().is_some() => v.as_u64().unwrap(),
+                Some(v) if v.as_str() == Some("member") || v.as_str() == Some("user") => 1,
+                _ => 0, // default role
+            };
+            let allow = parse_permission_value(item.get("allow"));
+            let deny = parse_permission_value(item.get("deny"));
+            overwrites.push(json!({
+                "id": id_str,
+                "type": o_type,
+                "allow": allow,
+                "deny": deny
+            }));
+        }
+    }
+    Some(overwrites)
+}
+
+fn parse_color(val: &Value) -> u64 {
+    if let Some(n) = val.as_u64() {
+        return n;
+    }
+    if let Some(s) = val.as_str() {
+        let s_trimmed = s.trim();
+        match s_trimmed.to_uppercase().as_str() {
+            "DEFAULT" => return 0,
+            "AQUA" | "CYAN" => return 0x1ABC9C,
+            "GREEN" => return 0x2ECC71,
+            "BLUE" => return 0x3498DB,
+            "PURPLE" => return 0x9B59B6,
+            "GOLD" | "YELLOW" => return 0xF1C40F,
+            "ORANGE" => return 0xE67E22,
+            "RED" => return 0xE74C3C,
+            "GREY" | "GRAY" => return 0x95A5A6,
+            "NAVY" | "DARK_BLUE" => return 0x34495E,
+            "BLURPLE" => return 0x5865F2,
+            "FUCHSIA" | "PINK" => return 0xEB459E,
+            "WHITE" => return 0xFFFFFF,
+            "BLACK" => return 0x000001,
+            _ => {}
+        }
+        let clean = s_trimmed.trim_start_matches('#');
+        if let Ok(n) = u64::from_str_radix(clean, 16) {
+            return n;
+        }
+        if let Ok(n) = s_trimmed.parse::<u64>() {
+            return n;
+        }
+    }
+    0
+}
+
 async fn handle_discord_response(resp: reqwest::Response) -> Result<Value, String> {
     let status = resp.status();
     if status.is_success() {
@@ -411,22 +572,78 @@ pub async fn execute_connection_action(
                         .or_else(|| args.get("role_name"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("New Role");
-                    let color = args.get("color").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let permissions = args
-                        .get("permissions")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("0");
+                    let color = args.get("color").map(parse_color).unwrap_or(0);
+                    let permissions = parse_permission_value(args.get("permissions"));
+                    let hoist = args.get("hoist").and_then(|v| v.as_bool()).unwrap_or(true);
+                    let mentionable = args
+                        .get("mentionable")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
+                    let mut body = json!({
+                        "name": role_name,
+                        "color": color,
+                        "permissions": permissions,
+                        "hoist": hoist,
+                        "mentionable": mentionable
+                    });
+                    if let Some(icon) = args.get("icon").and_then(|v| v.as_str()) {
+                        body["icon"] = json!(icon);
+                    }
+                    if let Some(emoji) = args.get("unicode_emoji").and_then(|v| v.as_str()) {
+                        body["unicode_emoji"] = json!(emoji);
+                    }
+
                     let url = format!("https://discord.com/api/v10/guilds/{}/roles", g_id);
                     let resp = client
                         .post(&url)
                         .header("Authorization", format!("Bot {}", token.trim()))
                         .header("Content-Type", "application/json")
-                        .json(&json!({
-                            "name": role_name,
-                            "color": color,
-                            "permissions": permissions,
-                            "hoist": true
-                        }))
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "edit_role" | "update_role" | "set_role_permissions" => {
+                    let g_id = guild_id.ok_or("Guild ID is required")?;
+                    let role_id = args
+                        .get("role_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("role_id is required")?;
+                    let mut body = json!({});
+                    if let Some(name) = args
+                        .get("name")
+                        .or_else(|| args.get("role_name"))
+                        .and_then(|v| v.as_str())
+                    {
+                        body["name"] = json!(name);
+                    }
+                    if let Some(c) = args.get("color") {
+                        body["color"] = json!(parse_color(c));
+                    }
+                    if let Some(p) = args.get("permissions") {
+                        body["permissions"] = json!(parse_permission_value(Some(p)));
+                    }
+                    if let Some(hoist) = args.get("hoist").and_then(|v| v.as_bool()) {
+                        body["hoist"] = json!(hoist);
+                    }
+                    if let Some(mentionable) = args.get("mentionable").and_then(|v| v.as_bool()) {
+                        body["mentionable"] = json!(mentionable);
+                    }
+                    if let Some(icon) = args.get("icon").and_then(|v| v.as_str()) {
+                        body["icon"] = json!(icon);
+                    }
+                    if let Some(emoji) = args.get("unicode_emoji").and_then(|v| v.as_str()) {
+                        body["unicode_emoji"] = json!(emoji);
+                    }
+
+                    let url = format!("https://discord.com/api/v10/guilds/{}/roles/{}", g_id, role_id);
+                    let resp = client
+                        .patch(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&body)
                         .send()
                         .await
                         .map_err(|e| e.to_string())?;
@@ -450,7 +667,29 @@ pub async fn execute_connection_action(
                         .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
-                "list_roles" => {
+                "get_role" | "view_role" => {
+                    let g_id = guild_id.ok_or("Guild ID is required for getting Discord role")?;
+                    let role_id = args.get("role_id").and_then(|v| v.as_str());
+                    let url = format!("https://discord.com/api/v10/guilds/{}/roles", g_id);
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let res = handle_discord_response(resp).await?;
+                    if let Some(r_id) = role_id {
+                        if let Some(arr) = res.get("data").and_then(|v| v.as_array()).or_else(|| res.as_array()) {
+                            if let Some(found) = arr.iter().find(|r| r.get("id").and_then(|v| v.as_str()) == Some(r_id)) {
+                                return Ok(json!({ "success": true, "data": found }));
+                            } else {
+                                return Err(format!("Role with id {} not found", r_id));
+                            }
+                        }
+                    }
+                    Ok(res)
+                }
+                "list_roles" | "view_roles" => {
                     let g_id = guild_id.ok_or("Guild ID is required for listing Discord roles")?;
                     let url = format!("https://discord.com/api/v10/guilds/{}/roles", g_id);
                     let resp = client
@@ -461,7 +700,23 @@ pub async fn execute_connection_action(
                         .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
-                "list_channels" => {
+                "modify_role_positions" | "reorder_roles" => {
+                    let g_id = guild_id.ok_or("Guild ID is required")?;
+                    let roles = args
+                        .get("roles")
+                        .ok_or("roles array is required for reordering roles")?;
+                    let url = format!("https://discord.com/api/v10/guilds/{}/roles", g_id);
+                    let resp = client
+                        .patch(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(roles)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "list_channels" | "view_channels" | "get_channels" => {
                     let g_id =
                         guild_id.ok_or("Guild ID is required for listing Discord channels")?;
                     let url = format!("https://discord.com/api/v10/guilds/{}/channels", g_id);
@@ -473,7 +728,7 @@ pub async fn execute_connection_action(
                         .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
-                "get_channel" => {
+                "get_channel" | "view_channel" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
                     let url = format!("https://discord.com/api/v10/channels/{}", c_id);
                     let resp = client
@@ -484,22 +739,39 @@ pub async fn execute_connection_action(
                         .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
-                "create_channel" => {
+                "create_channel" | "create_category" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
                     let name = args
                         .get("name")
                         .or_else(|| args.get("channel_name"))
                         .and_then(|v| v.as_str())
                         .ok_or("channel name is required")?;
-                    let c_type = args.get("type").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let topic = args.get("topic").and_then(|v| v.as_str());
-                    let parent_id = args.get("parent_id").and_then(|v| v.as_str());
+                    let default_type = if action == "create_category" { 4 } else { 0 };
+                    let c_type = args.get("type").and_then(|v| v.as_u64()).unwrap_or(default_type);
                     let mut body = json!({ "name": name, "type": c_type });
-                    if let Some(t) = topic {
-                        body["topic"] = json!(t);
+                    if let Some(topic) = args.get("topic").and_then(|v| v.as_str()) {
+                        body["topic"] = json!(topic);
                     }
-                    if let Some(p) = parent_id {
-                        body["parent_id"] = json!(p);
+                    if let Some(parent_id) = args.get("parent_id").and_then(|v| v.as_str()) {
+                        body["parent_id"] = json!(parent_id);
+                    }
+                    if let Some(pos) = args.get("position").and_then(|v| v.as_u64()) {
+                        body["position"] = json!(pos);
+                    }
+                    if let Some(nsfw) = args.get("nsfw").and_then(|v| v.as_bool()) {
+                        body["nsfw"] = json!(nsfw);
+                    }
+                    if let Some(bitrate) = args.get("bitrate").and_then(|v| v.as_u64()) {
+                        body["bitrate"] = json!(bitrate);
+                    }
+                    if let Some(user_limit) = args.get("user_limit").and_then(|v| v.as_u64()) {
+                        body["user_limit"] = json!(user_limit);
+                    }
+                    if let Some(rate_limit) = args.get("rate_limit_per_user").and_then(|v| v.as_u64()) {
+                        body["rate_limit_per_user"] = json!(rate_limit);
+                    }
+                    if let Some(overwrites) = parse_permission_overwrites(args.get("permission_overwrites")) {
+                        body["permission_overwrites"] = json!(overwrites);
                     }
                     let url = format!("https://discord.com/api/v10/guilds/{}/channels", g_id);
                     let resp = client
@@ -512,7 +784,7 @@ pub async fn execute_connection_action(
                         .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
-                "delete_channel" => {
+                "delete_channel" | "delete_category" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
                     let url = format!("https://discord.com/api/v10/channels/{}", c_id);
                     let resp = client
@@ -523,17 +795,38 @@ pub async fn execute_connection_action(
                         .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
-                "edit_channel" | "set_channel_topic" => {
+                "edit_channel" | "edit_category" | "set_channel_topic" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
                     let mut body = json!({});
                     if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
                         body["name"] = json!(name);
                     }
+                    if let Some(c_type) = args.get("type").and_then(|v| v.as_u64()) {
+                        body["type"] = json!(c_type);
+                    }
                     if let Some(topic) = args.get("topic").and_then(|v| v.as_str()) {
                         body["topic"] = json!(topic);
                     }
+                    if let Some(parent_id) = args.get("parent_id").and_then(|v| v.as_str()) {
+                        body["parent_id"] = json!(parent_id);
+                    }
+                    if let Some(pos) = args.get("position").and_then(|v| v.as_u64()) {
+                        body["position"] = json!(pos);
+                    }
                     if let Some(nsfw) = args.get("nsfw").and_then(|v| v.as_bool()) {
                         body["nsfw"] = json!(nsfw);
+                    }
+                    if let Some(bitrate) = args.get("bitrate").and_then(|v| v.as_u64()) {
+                        body["bitrate"] = json!(bitrate);
+                    }
+                    if let Some(user_limit) = args.get("user_limit").and_then(|v| v.as_u64()) {
+                        body["user_limit"] = json!(user_limit);
+                    }
+                    if let Some(rate_limit) = args.get("rate_limit_per_user").and_then(|v| v.as_u64()) {
+                        body["rate_limit_per_user"] = json!(rate_limit);
+                    }
+                    if let Some(overwrites) = parse_permission_overwrites(args.get("permission_overwrites")) {
+                        body["permission_overwrites"] = json!(overwrites);
                     }
                     let url = format!("https://discord.com/api/v10/channels/{}", c_id);
                     let resp = client
@@ -541,6 +834,174 @@ pub async fn execute_connection_action(
                         .header("Authorization", format!("Bot {}", token.trim()))
                         .header("Content-Type", "application/json")
                         .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "modify_channel_positions" | "reorder_channels" => {
+                    let g_id = guild_id.ok_or("Guild ID is required")?;
+                    let channels = args
+                        .get("channels")
+                        .ok_or("channels array is required for reordering channels")?;
+                    let url = format!("https://discord.com/api/v10/guilds/{}/channels", g_id);
+                    let resp = client
+                        .patch(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(channels)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "set_channel_permissions" | "set_permission_overwrite" | "edit_channel_permissions" | "set_permissions" => {
+                    let c_id = channel_id.ok_or("Channel ID is required")?;
+                    let overwrite_id = args
+                        .get("overwrite_id")
+                        .or_else(|| args.get("target_id"))
+                        .or_else(|| args.get("role_id"))
+                        .or_else(|| args.get("user_id"))
+                        .and_then(|v| v.as_str())
+                        .ok_or("overwrite_id (role_id or user_id) is required")?;
+
+                    let o_type = match args.get("type") {
+                        Some(v) if v.as_u64().is_some() => v.as_u64().unwrap(),
+                        Some(v) if v.as_str() == Some("member") || v.as_str() == Some("user") => 1,
+                        _ => 0,
+                    };
+
+                    let allow = parse_permission_value(args.get("allow"));
+                    let deny = parse_permission_value(args.get("deny"));
+
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/permissions/{}",
+                        c_id, overwrite_id
+                    );
+                    let resp = client
+                        .put(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&json!({
+                            "allow": allow,
+                            "deny": deny,
+                            "type": o_type
+                        }))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "delete_channel_permissions" | "delete_permission_overwrite" => {
+                    let c_id = channel_id.ok_or("Channel ID is required")?;
+                    let overwrite_id = args
+                        .get("overwrite_id")
+                        .or_else(|| args.get("target_id"))
+                        .or_else(|| args.get("role_id"))
+                        .or_else(|| args.get("user_id"))
+                        .and_then(|v| v.as_str())
+                        .ok_or("overwrite_id (role_id or user_id) is required")?;
+
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/permissions/{}",
+                        c_id, overwrite_id
+                    );
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "edit_guild" | "edit_server" => {
+                    let g_id = guild_id.ok_or("Guild ID is required")?;
+                    let mut body = json!({});
+                    if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
+                        body["name"] = json!(name);
+                    }
+                    if let Some(desc) = args.get("description").and_then(|v| v.as_str()) {
+                        body["description"] = json!(desc);
+                    }
+                    if let Some(icon) = args.get("icon").and_then(|v| v.as_str()) {
+                        body["icon"] = json!(icon);
+                    }
+                    if let Some(banner) = args.get("banner").and_then(|v| v.as_str()) {
+                        body["banner"] = json!(banner);
+                    }
+                    if let Some(splash) = args.get("splash").and_then(|v| v.as_str()) {
+                        body["splash"] = json!(splash);
+                    }
+                    if let Some(afk_id) = args.get("afk_channel_id").and_then(|v| v.as_str()) {
+                        body["afk_channel_id"] = json!(afk_id);
+                    }
+                    if let Some(afk_t) = args.get("afk_timeout").and_then(|v| v.as_u64()) {
+                        body["afk_timeout"] = json!(afk_t);
+                    }
+                    if let Some(sys_id) = args.get("system_channel_id").and_then(|v| v.as_str()) {
+                        body["system_channel_id"] = json!(sys_id);
+                    }
+                    if let Some(verif) = args.get("verification_level").and_then(|v| v.as_u64()) {
+                        body["verification_level"] = json!(verif);
+                    }
+
+                    let url = format!("https://discord.com/api/v10/guilds/{}", g_id);
+                    let resp = client
+                        .patch(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "list_emojis" | "list_guild_emojis" => {
+                    let g_id = guild_id.ok_or("Guild ID is required")?;
+                    let url = format!("https://discord.com/api/v10/guilds/{}/emojis", g_id);
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "create_emoji" => {
+                    let g_id = guild_id.ok_or("Guild ID is required")?;
+                    let name = args
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .ok_or("emoji name is required")?;
+                    let image = args
+                        .get("image")
+                        .and_then(|v| v.as_str())
+                        .ok_or("image data string (data:image/jpeg;base64,...) is required")?;
+                    let mut body = json!({ "name": name, "image": image });
+                    if let Some(r) = args.get("roles") {
+                        body["roles"] = r.clone();
+                    }
+                    let url = format!("https://discord.com/api/v10/guilds/{}/emojis", g_id);
+                    let resp = client
+                        .post(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "delete_emoji" => {
+                    let g_id = guild_id.ok_or("Guild ID is required")?;
+                    let emoji_id = args
+                        .get("emoji_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("emoji_id is required")?;
+                    let url = format!("https://discord.com/api/v10/guilds/{}/emojis/{}", g_id, emoji_id);
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
                         .send()
                         .await
                         .map_err(|e| e.to_string())?;
@@ -970,7 +1431,7 @@ pub fn tool_definitions() -> Value {
                         },
                         "action": {
                             "type": "string",
-                            "description": "Action to perform (e.g., 'send_message', 'list_channels', 'create_channel', 'delete_channel', 'edit_channel', 'get_messages', 'delete_message', 'edit_message', 'pin_message', 'unpin_message', 'list_pins', 'add_reaction', 'delete_reaction', 'list_roles', 'create_role', 'delete_role', 'assign_role', 'remove_member_role', 'list_members', 'get_member', 'kick_member', 'ban_member', 'unban_member', 'list_bans', 'get_guild', 'create_thread', 'list_threads')"
+                            "description": "Action to perform (e.g., 'send_message', 'list_channels', 'create_channel', 'create_category', 'delete_channel', 'edit_channel', 'get_channel', 'reorder_channels', 'list_roles', 'get_role', 'create_role', 'edit_role', 'delete_role', 'reorder_roles', 'set_channel_permissions', 'delete_channel_permissions', 'assign_role', 'remove_member_role', 'list_members', 'get_member', 'kick_member', 'ban_member', 'unban_member', 'list_bans', 'get_guild', 'edit_guild', 'create_thread', 'list_threads', 'list_emojis', 'create_emoji', 'delete_emoji')"
                         },
                         "args": {
                             "type": "object",
@@ -982,4 +1443,55 @@ pub fn tool_definitions() -> Value {
             }
         }
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_parse_permission_value() {
+        assert_eq!(parse_permission_value(None), "0");
+        assert_eq!(parse_permission_value(Some(&json!("8"))), "8");
+        assert_eq!(parse_permission_value(Some(&json!(8))), "8");
+        assert_eq!(parse_permission_value(Some(&json!("ADMINISTRATOR"))), "8");
+
+        // VIEW_CHANNEL (1024) | SEND_MESSAGES (2048) = 3072
+        assert_eq!(
+            parse_permission_value(Some(&json!(["VIEW_CHANNEL", "SEND_MESSAGES"]))),
+            "3072"
+        );
+        assert_eq!(
+            parse_permission_value(Some(&json!("VIEW_CHANNEL, SEND_MESSAGES"))),
+            "3072"
+        );
+    }
+
+    #[test]
+    fn test_parse_color() {
+        assert_eq!(parse_color(&json!(0)), 0);
+        assert_eq!(parse_color(&json!("#FF0000")), 0xFF0000);
+        assert_eq!(parse_color(&json!("RED")), 0xE74C3C);
+        assert_eq!(parse_color(&json!("BLURPLE")), 0x5865F2);
+        assert_eq!(parse_color(&json!(16711680)), 16711680);
+    }
+
+    #[test]
+    fn test_parse_permission_overwrites() {
+        let input = json!([
+            {
+                "id": "123456",
+                "type": "role",
+                "allow": ["VIEW_CHANNEL", "SEND_MESSAGES"],
+                "deny": ["MANAGE_MESSAGES"]
+            }
+        ]);
+        let parsed = parse_permission_overwrites(Some(&input)).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["id"], "123456");
+        assert_eq!(parsed[0]["type"], 0);
+        assert_eq!(parsed[0]["allow"], "3072");
+        assert_eq!(parsed[0]["deny"], "8192");
+    }
 }

@@ -194,6 +194,7 @@ fn builtin_skills() -> Vec<BuiltinSkill> {
         ("skill-creator", "Skill creator", "In-depth methodology for writing, editing, and improving skills — read this before authoring or updating one.", include_str!("../skills_builtin/skill-creator/SKILL.md")),
         ("agents-md", "AGENTS.md authoring", "How to write, structure, and maintain a project's AGENTS.md — the per-repo instructions file Kestrel (and other coding agents) reads automatically.", include_str!("../skills_builtin/agents-md.md")),
         ("decompile-jar", "Decompiling and rebuilding a JVM jar", "Unpacking a jar (including an obfuscated one), decompiling its classes, and iterating on the result until it builds and runs again.", include_str!("../skills_builtin/decompile-jar.md")),
+        ("discord-server-builder", "Discord Server Builder", "Complete guide to constructing Discord server structures, roles, categories, channels, and permission overwrites from prompt specifications.", include_str!("../skills_builtin/discord-server-builder.md")),
     ];
 
     raw_builtins
