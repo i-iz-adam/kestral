@@ -3,6 +3,19 @@ export interface PlanItem {
   status: string;
 }
 
+export interface GitFile {
+  path: string;
+  status: string;
+  staged: boolean;
+  additions: number;
+  deletions: number;
+}
+
+export interface GitDiff {
+  files: GitFile[];
+  patch: string;
+}
+
 export interface Connection {
   id: string;
   type: string;

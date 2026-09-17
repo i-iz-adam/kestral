@@ -44,7 +44,11 @@ pub(crate) struct LoopDetector {
 
 impl LoopDetector {
     pub(crate) fn new(max_history: usize, threshold: usize) -> Self {
-        Self { signatures: Vec::with_capacity(max_history), max_history, threshold }
+        Self {
+            signatures: Vec::with_capacity(max_history),
+            max_history,
+            threshold,
+        }
     }
 
     fn hash_str(s: &str) -> u64 {
@@ -184,7 +188,9 @@ impl StopRequests {
     /// only has a session id (not a loop holding its own handle).
     pub(crate) fn is_requested(&self, session_id: &str) -> bool {
         let map = self.0.lock().unwrap();
-        map.get(session_id).and_then(|w| w.upgrade()).is_some_and(|s| s.requested.load(Ordering::Relaxed))
+        map.get(session_id)
+            .and_then(|w| w.upgrade())
+            .is_some_and(|s| s.requested.load(Ordering::Relaxed))
     }
 
     /// Marks a session as stop-requested and wakes any in-flight waiters
@@ -430,7 +436,15 @@ pub(crate) fn emit_tool_event(
 ) {
     let _ = app_handle.emit(
         "agent://tool-call",
-        ToolEvent { session_id, call_id, name, status, args, result, parent_call_id },
+        ToolEvent {
+            session_id,
+            call_id,
+            name,
+            status,
+            args,
+            result,
+            parent_call_id,
+        },
     );
 }
 
@@ -450,8 +464,14 @@ pub(crate) fn emit_skill_loaded(
     let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
     let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
     emit_tool_event(
-        app_handle, session_id, &call_id, "__skill_loaded__", "done",
-        Some(args), Some(skill.description.clone()), parent_call_id,
+        app_handle,
+        session_id,
+        &call_id,
+        "__skill_loaded__",
+        "done",
+        Some(args),
+        Some(skill.description.clone()),
+        parent_call_id,
     );
 }
 
@@ -470,10 +490,16 @@ pub(crate) async fn execute_tool(
     args: &Value,
 ) -> Result<String, String> {
     if name == "delegate_to_subagent" {
-        let task = args.get("task").and_then(|v| v.as_str()).ok_or("missing task")?;
+        let task = args
+            .get("task")
+            .and_then(|v| v.as_str())
+            .ok_or("missing task")?;
         // Boxed to break the async recursion cycle:
         // execute_tool -> subagent::run -> handle_tool_call -> execute_tool.
-        return Box::pin(subagent::run(app_handle, approvals, stops, stop_flag, session, call_id, task)).await;
+        return Box::pin(subagent::run(
+            app_handle, approvals, stops, stop_flag, session, call_id, task,
+        ))
+        .await;
     }
     if name == "update_plan" {
         // Persisted straight to disk, independent of `session` and of the
@@ -487,7 +513,11 @@ pub(crate) async fn execute_tool(
         // needs real async cancellation (a timeout, and a kill path the
         // Stop button can actually reach), which running it synchronously
         // on the async runtime (the old behavior) couldn't provide at all.
-        let command = args.get("command").and_then(|v| v.as_str()).ok_or("missing command")?.to_string();
+        let command = args
+            .get("command")
+            .and_then(|v| v.as_str())
+            .ok_or("missing command")?
+            .to_string();
         let timeout_secs = args
             .get("timeout_seconds")
             .and_then(|v| v.as_u64())
@@ -503,14 +533,24 @@ pub(crate) async fn execute_tool(
         )
         .await;
     }
-    let workspace = if session.workspace.trim().is_empty() { None } else { Some(session.workspace.as_str()) };
+    let workspace = if session.workspace.trim().is_empty() {
+        None
+    } else {
+        Some(session.workspace.as_str())
+    };
     if let Some(result) = skills::maybe_execute(app_handle, name, args, workspace) {
         return result;
     }
     if name == "integration_action" {
-        let conn_name = args.get("connection_name").and_then(|v| v.as_str()).unwrap_or("");
+        let conn_name = args
+            .get("connection_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("");
-        let action_args = args.get("args").cloned().unwrap_or(Value::Object(Default::default()));
+        let action_args = args
+            .get("args")
+            .cloned()
+            .unwrap_or(Value::Object(Default::default()));
         return connections::execute_connection_action(app_handle, conn_name, action, action_args)
             .await
             .map(|v| serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string()));
@@ -530,12 +570,21 @@ pub(crate) async fn execute_tool(
         let cfg = config::load_omniroute_config(app_handle)
             .ok_or("No OmniRoute config saved yet — finish setup first")?;
         if name == "web_search" {
-            let query = args.get("query").and_then(|v| v.as_str()).ok_or("missing query parameter")?;
+            let query = args
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or("missing query parameter")?;
             let provider = args.get("provider").and_then(|v| v.as_str());
-            let limit = args.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize);
+            let limit = args
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize);
             return omniroute::web_search(&cfg, query, provider, limit).await;
         } else {
-            let url = args.get("url").and_then(|v| v.as_str()).ok_or("missing url parameter")?;
+            let url = args
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or("missing url parameter")?;
             let provider = args.get("provider").and_then(|v| v.as_str());
             return omniroute::web_fetch(&cfg, url, provider).await;
         }
@@ -572,8 +621,14 @@ pub(crate) async fn handle_tool_call(
     let args: Value = serde_json::from_str(&call.function.arguments).unwrap_or(Value::Null);
 
     emit_tool_event(
-        app_handle, session_id, &call.id, &call.function.name, "start",
-        Some(args.clone()), None, parent_call_id,
+        app_handle,
+        session_id,
+        &call.id,
+        &call.function.name,
+        "start",
+        Some(args.clone()),
+        None,
+        parent_call_id,
     );
 
     // Re-read planning_enabled fresh rather than trusting the `session`
@@ -588,11 +643,21 @@ pub(crate) async fn handle_tool_call(
 
     if planning_enabled && is_mutating_call(&call.function.name, &args) {
         let (tx, rx) = oneshot::channel::<bool>();
-        approvals.0.lock().unwrap().insert(call.id.clone(), (session_id.to_string(), tx));
+        approvals
+            .0
+            .lock()
+            .unwrap()
+            .insert(call.id.clone(), (session_id.to_string(), tx));
 
         emit_tool_event(
-            app_handle, session_id, &call.id, &call.function.name, "awaiting-approval",
-            Some(args.clone()), None, parent_call_id,
+            app_handle,
+            session_id,
+            &call.id,
+            &call.function.name,
+            "awaiting-approval",
+            Some(args.clone()),
+            None,
+            parent_call_id,
         );
 
         let approved = tokio::select! {
@@ -604,8 +669,14 @@ pub(crate) async fn handle_tool_call(
         if !approved {
             let result = "Rejected by user.".to_string();
             emit_tool_event(
-                app_handle, session_id, &call.id, &call.function.name, "error",
-                None, Some(result.clone()), parent_call_id,
+                app_handle,
+                session_id,
+                &call.id,
+                &call.function.name,
+                "error",
+                None,
+                Some(result.clone()),
+                parent_call_id,
             );
             return ChatMessage {
                 role: "tool".into(),
@@ -617,13 +688,28 @@ pub(crate) async fn handle_tool_call(
         }
     }
 
-    let result = execute_tool(app_handle, approvals, stops, stop_flag, session, &call.id, &call.function.name, &args)
-        .await
-        .unwrap_or_else(|e| format!("error: {}", e));
+    let result = execute_tool(
+        app_handle,
+        approvals,
+        stops,
+        stop_flag,
+        session,
+        &call.id,
+        &call.function.name,
+        &args,
+    )
+    .await
+    .unwrap_or_else(|e| format!("error: {}", e));
 
     emit_tool_event(
-        app_handle, session_id, &call.id, &call.function.name, "done",
-        None, Some(result.clone()), parent_call_id,
+        app_handle,
+        session_id,
+        &call.id,
+        &call.function.name,
+        "done",
+        None,
+        Some(result.clone()),
+        parent_call_id,
     );
 
     ChatMessage {
@@ -652,7 +738,15 @@ pub async fn run_turn(
     user_message: String,
     images: Option<Vec<String>>,
 ) -> Result<(), String> {
-    run_turn_with_stop(app_handle, approvals, stops, session_id, user_message, images).await
+    run_turn_with_stop(
+        app_handle,
+        approvals,
+        stops,
+        session_id,
+        user_message,
+        images,
+    )
+    .await
 }
 
 pub async fn run_turn_with_stop(
@@ -665,14 +759,31 @@ pub async fn run_turn_with_stop(
 ) -> Result<(), String> {
     stops.reset(&session_id);
     let stop_flag = stops.entry(&session_id);
-    let result = run_turn_inner(&app_handle, approvals, &stops, stop_flag.clone(), &session_id, user_message, images).await;
-    let reason = if stop_flag.requested.load(Ordering::Relaxed) { "stopped" } else { "normal" };
+    let result = run_turn_inner(
+        &app_handle,
+        approvals,
+        &stops,
+        stop_flag.clone(),
+        &session_id,
+        user_message,
+        images,
+    )
+    .await;
+    let reason = if stop_flag.requested.load(Ordering::Relaxed) {
+        "stopped"
+    } else {
+        "normal"
+    };
     let _ = app_handle.emit(
         "agent://turn-end",
         TurnEndEvent {
             session_id: &session_id,
             error: result.as_ref().err().map(String::as_str),
-            reason: if reason == "normal" { None } else { Some(reason) },
+            reason: if reason == "normal" {
+                None
+            } else {
+                Some(reason)
+            },
         },
     );
     drop(stop_flag);
@@ -701,7 +812,11 @@ async fn stream_assistant_turn(
     let request_id = uuid::Uuid::new_v4().to_string();
     let _ = app_handle.emit(
         "agent://message-start",
-        MessageStartEvent { session_id, request_id: &request_id, role: "assistant" },
+        MessageStartEvent {
+            session_id,
+            request_id: &request_id,
+            role: "assistant",
+        },
     );
 
     let delta_app_handle = app_handle.clone();
@@ -715,7 +830,11 @@ async fn stream_assistant_turn(
         move |delta: &str| {
             let _ = delta_app_handle.emit(
                 "agent://message-delta",
-                MessageDeltaEvent { session_id: &delta_session_id, request_id: &delta_request_id, delta },
+                MessageDeltaEvent {
+                    session_id: &delta_session_id,
+                    request_id: &delta_request_id,
+                    delta,
+                },
             );
         },
     )
@@ -724,7 +843,10 @@ async fn stream_assistant_turn(
     if result.is_err() {
         let _ = app_handle.emit(
             "agent://message-cancel",
-            MessageCancelEvent { session_id, request_id: &request_id },
+            MessageCancelEvent {
+                session_id,
+                request_id: &request_id,
+            },
         );
     }
 
@@ -743,8 +865,7 @@ async fn run_turn_inner(
     let cfg = config::load_omniroute_config(app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
 
-    let mut session =
-        sessions::load(app_handle, session_id).ok_or("Session not found")?;
+    let mut session = sessions::load(app_handle, session_id).ok_or("Session not found")?;
 
     maybe_auto_generate_title(app_handle, &cfg, session_id, &session.title, &user_message);
 
@@ -771,7 +892,7 @@ async fn run_turn_inner(
     // old sessions. The delegation addendum is only appended when the
     // subagent tool is actually in this session's tool list — no point
     // telling the model about a tool it can't see.
-        let system_prompt = if session.mode == "general" {
+    let system_prompt = if session.mode == "general" {
         prompts::GENERAL_SYSTEM_PROMPT.to_string()
     } else {
         // Skill authoring tools (create_skill/edit_skill/propose_skill) are
@@ -790,9 +911,13 @@ async fn run_turn_inner(
             prompts::IMAGE_GENERATION_ADDENDUM
         );
         if session.subagents_enabled {
-            prompt = format!("{}
+            prompt = format!(
+                "{}
 
-{}", prompt, prompts::SUBAGENT_DELEGATION_ADDENDUM);
+{}",
+                prompt,
+                prompts::SUBAGENT_DELEGATION_ADDENDUM
+            );
         }
 
         let active_connections = connections::load_connections(app_handle);
@@ -800,7 +925,10 @@ async fn run_turn_inner(
             let mut conn_summary = String::from("\n\nActive Integrations & Named Connections:\n");
             for c in &active_connections {
                 let acct = c.account_name.as_deref().unwrap_or("configured");
-                conn_summary.push_str(&format!("- \"{}\" (Type: {}, Account: {})\n", c.name, c.r#type, acct));
+                conn_summary.push_str(&format!(
+                    "- \"{}\" (Type: {}, Account: {})\n",
+                    c.name, c.r#type, acct
+                ));
             }
             conn_summary.push_str("When the user asks to use a connection by name (e.g., 'Using The Magician, create a role for moderators'), call integration_action with connection_name matching that exact name.");
             prompt.push_str(&conn_summary);
@@ -816,18 +944,50 @@ async fn run_turn_inner(
             .as_array()
             .cloned()
             .unwrap_or_default();
-        all.extend(skills::tool_definitions().as_array().cloned().unwrap_or_default());
-        all.extend(plan::tool_definitions().as_array().cloned().unwrap_or_default());
-        all.extend(images::tool_definitions().as_array().cloned().unwrap_or_default());
+        all.extend(
+            skills::tool_definitions()
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        );
+        all.extend(
+            plan::tool_definitions()
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        );
+        all.extend(
+            images::tool_definitions()
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        );
         let active_conns = connections::load_connections(app_handle);
         if !active_conns.is_empty() {
-            all.extend(connections::tool_definitions().as_array().cloned().unwrap_or_default());
+            all.extend(
+                connections::tool_definitions()
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
+            );
         }
-        if github::load_token(app_handle).is_some() || active_conns.iter().any(|c| c.r#type == "github") {
-            all.extend(github::tool_definitions().as_array().cloned().unwrap_or_default());
+        if github::load_token(app_handle).is_some()
+            || active_conns.iter().any(|c| c.r#type == "github")
+        {
+            all.extend(
+                github::tool_definitions()
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
+            );
         }
         if session.subagents_enabled {
-            all.extend(subagent::tool_definitions().as_array().cloned().unwrap_or_default());
+            all.extend(
+                subagent::tool_definitions()
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
+            );
         }
 
         if !tools::check_python_status().installed {
@@ -850,8 +1010,21 @@ async fn run_turn_inner(
     // stays present through however many tool rounds the turn takes.
     // Deduplicated per session context so each unique skill is auto-loaded
     // into context only once.
-    let workspace = if session.workspace.trim().is_empty() { None } else { Some(session.workspace.as_str()) };
+    let workspace = if session.workspace.trim().is_empty() {
+        None
+    } else {
+        Some(session.workspace.as_str())
+    };
     let mut skill_messages: Vec<ChatMessage> = Vec::new();
+
+    // Standing directives are independent of skill matching and refreshed each turn.
+    if let Some(directives) = skills::format_directives(&skills::read_directives(workspace)) {
+        skill_messages.push(ChatMessage {
+            role: "system".into(),
+            content: Some(directives),
+            ..Default::default()
+        });
+    }
     if session.mode != "general" {
         let mut loaded_skill_ids = skills::get_loaded_skill_ids(&session);
 
@@ -865,25 +1038,35 @@ async fn run_turn_inner(
         // decides relevance the way a person skimming list_skills would,
         // rather than a fixed word list having to predict every phrasing
         // in advance.
-        let mut matched: Vec<skills::Skill> = skills::find_relevant(app_handle, &user_message, workspace);
-        let already: std::collections::HashSet<String> =
-            matched.iter().map(|s| s.id.clone()).chain(loaded_skill_ids.iter().cloned()).collect();
-        matched.extend(skills::find_relevant_ai(app_handle, &cfg, workspace, &user_message, &already).await);
+        let mut matched: Vec<skills::Skill> =
+            skills::find_relevant(app_handle, &user_message, workspace);
+        let already: std::collections::HashSet<String> = matched
+            .iter()
+            .map(|s| s.id.clone())
+            .chain(loaded_skill_ids.iter().cloned())
+            .collect();
+        matched.extend(
+            skills::find_relevant_ai(app_handle, &cfg, workspace, &user_message, &already).await,
+        );
 
         for skill in matched {
             if !loaded_skill_ids.contains(&skill.id) {
                 if skills::get_content(app_handle, &skill.id, workspace).is_some() {
                     emit_skill_loaded(app_handle, session_id, &skill, None);
                     let call_id = format!("skill-{}-{}", skill.id, uuid::Uuid::new_v4());
-                    let args = serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
+                    let args =
+                        serde_json::json!({ "skill_id": skill.id, "skill_name": skill.name });
                     session.messages.push(ChatMessage {
                         role: "skill-loaded".into(),
-                        content: Some(serde_json::json!({
-                            "call_id": call_id,
-                            "name": "__skill_loaded__",
-                            "args": args,
-                            "result": skill.description.clone(),
-                        }).to_string()),
+                        content: Some(
+                            serde_json::json!({
+                                "call_id": call_id,
+                                "name": "__skill_loaded__",
+                                "args": args,
+                                "result": skill.description.clone(),
+                            })
+                            .to_string(),
+                        ),
                         ..Default::default()
                     });
                     loaded_skill_ids.insert(skill.id.clone());
@@ -897,7 +1080,10 @@ async fn run_turn_inner(
                 if let Some(content) = skills::get_content(app_handle, id, workspace) {
                     skill_messages.push(ChatMessage {
                         role: "system".into(),
-                        content: Some(format!("Relevant skill — {}:\n\n{}", skill_info.name, content)),
+                        content: Some(format!(
+                            "Relevant skill — {}:\n\n{}",
+                            skill_info.name, content
+                        )),
                         ..Default::default()
                     });
                 }
@@ -972,8 +1158,15 @@ async fn run_turn_inner(
         let request_messages = build_messages(&session);
 
         let model = effective_model(&cfg);
-        let (mut request_id, mut stream_result) =
-            stream_assistant_turn(app_handle, &cfg, model, session_id, &request_messages, tools_schema.as_ref()).await;
+        let (mut request_id, mut stream_result) = stream_assistant_turn(
+            app_handle,
+            &cfg,
+            model,
+            session_id,
+            &request_messages,
+            tools_schema.as_ref(),
+        )
+        .await;
 
         if let Err(e) = &stream_result {
             if context::is_context_length_error(e) {
@@ -986,8 +1179,15 @@ async fn run_turn_inner(
                 if context::maybe_compact(&cfg, &mut session.messages, true).await {
                     sessions::save_async(app_handle, &session);
                     let retry_messages = build_messages(&session);
-                    let (rid2, res2) =
-                        stream_assistant_turn(app_handle, &cfg, model, session_id, &retry_messages, tools_schema.as_ref()).await;
+                    let (rid2, res2) = stream_assistant_turn(
+                        app_handle,
+                        &cfg,
+                        model,
+                        session_id,
+                        &retry_messages,
+                        tools_schema.as_ref(),
+                    )
+                    .await;
                     request_id = rid2;
                     stream_result = res2;
                 }
@@ -1002,7 +1202,10 @@ async fn run_turn_inner(
         if text.trim().is_empty() && tool_calls.is_empty() {
             let _ = app_handle.emit(
                 "agent://message-cancel",
-                MessageCancelEvent { session_id, request_id: &request_id },
+                MessageCancelEvent {
+                    session_id,
+                    request_id: &request_id,
+                },
             );
             return Err("Model returned an empty response (no text or tool calls). Please check model/provider configuration and try again.".to_string());
         }
@@ -1014,7 +1217,10 @@ async fn run_turn_inner(
             // placeholder instead of finalizing an empty bubble.
             let _ = app_handle.emit(
                 "agent://message-cancel",
-                MessageCancelEvent { session_id, request_id: &request_id },
+                MessageCancelEvent {
+                    session_id,
+                    request_id: &request_id,
+                },
             );
         } else {
             let _ = app_handle.emit(
@@ -1043,7 +1249,13 @@ async fn run_turn_inner(
             let mut reflect_session = session.clone();
             let reflect_tools = all_tool_names_this_turn.clone();
             tokio::spawn(async move {
-                reflect::maybe_reflect(&reflect_app, &reflect_cfg, &mut reflect_session, &reflect_tools).await;
+                reflect::maybe_reflect(
+                    &reflect_app,
+                    &reflect_cfg,
+                    &mut reflect_session,
+                    &reflect_tools,
+                )
+                .await;
             });
             return Ok(());
         }
@@ -1058,14 +1270,7 @@ async fn run_turn_inner(
             let session_id = session_id;
             async move {
                 handle_tool_call(
-                    app_handle,
-                    approvals,
-                    stops,
-                    stop_flag,
-                    session,
-                    session_id,
-                    call,
-                    None,
+                    app_handle, approvals, stops, stop_flag, session, session_id, call, None,
                 )
                 .await
             }
@@ -1127,7 +1332,11 @@ pub fn resolve_approval(approvals: &PendingApprovals, call_id: &str, approved: b
 /// off-switch use, so disabling planning mode also clears whatever's
 /// already stuck waiting instead of leaving it for a separate manual
 /// approve click. Returns how many calls were resolved.
-pub fn approve_all_pending(approvals: &PendingApprovals, session_id: &str, approved: bool) -> usize {
+pub fn approve_all_pending(
+    approvals: &PendingApprovals,
+    session_id: &str,
+    approved: bool,
+) -> usize {
     let mut map = approvals.0.lock().unwrap();
     let ids: Vec<String> = map
         .iter()

@@ -23,14 +23,38 @@ pub struct SetupStepDef {
 /// new ones.
 pub fn step_registry() -> Vec<SetupStepDef> {
     vec![
-        SetupStepDef { id: "welcome".into(), order: 0 },
-        SetupStepDef { id: "omniroute".into(), order: 1 },
-        SetupStepDef { id: "workspace".into(), order: 2 },
-        SetupStepDef { id: "defaults".into(), order: 3 },
-        SetupStepDef { id: "python".into(), order: 4 },
-        SetupStepDef { id: "stop".into(), order: 5 },
-        SetupStepDef { id: "installer".into(), order: 6 },
-        SetupStepDef { id: "finish".into(), order: 7 },
+        SetupStepDef {
+            id: "welcome".into(),
+            order: 0,
+        },
+        SetupStepDef {
+            id: "omniroute".into(),
+            order: 1,
+        },
+        SetupStepDef {
+            id: "workspace".into(),
+            order: 2,
+        },
+        SetupStepDef {
+            id: "defaults".into(),
+            order: 3,
+        },
+        SetupStepDef {
+            id: "python".into(),
+            order: 4,
+        },
+        SetupStepDef {
+            id: "stop".into(),
+            order: 5,
+        },
+        SetupStepDef {
+            id: "installer".into(),
+            order: 6,
+        },
+        SetupStepDef {
+            id: "finish".into(),
+            order: 7,
+        },
     ]
 }
 

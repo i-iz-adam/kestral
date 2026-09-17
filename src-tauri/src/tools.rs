@@ -250,7 +250,10 @@ pub fn tool_definitions() -> Value {
 /// Tools that mutate state and should be gated behind approval when
 /// planning mode is on. Read-only tools always execute immediately.
 pub fn is_mutating(tool_name: &str) -> bool {
-    matches!(tool_name, "write_file" | "edit_file" | "apply_patch" | "run_shell")
+    matches!(
+        tool_name,
+        "write_file" | "edit_file" | "apply_patch" | "run_shell"
+    )
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -304,7 +307,10 @@ pub fn check_python_status() -> PythonStatus {
 
 pub fn is_mutating_with_args(tool_name: &str, args: &Value) -> bool {
     if tool_name == "run_python" {
-        return args.get("workspace_access").and_then(|v| v.as_bool()).unwrap_or(false);
+        return args
+            .get("workspace_access")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
     }
     is_mutating(tool_name)
 }
@@ -450,7 +456,10 @@ fn norm_diff_path(raw: &str) -> Option<String> {
     if raw == "/dev/null" {
         return None;
     }
-    let stripped = raw.strip_prefix("a/").or_else(|| raw.strip_prefix("b/")).unwrap_or(raw);
+    let stripped = raw
+        .strip_prefix("a/")
+        .or_else(|| raw.strip_prefix("b/"))
+        .unwrap_or(raw);
     Some(stripped.to_string())
 }
 
@@ -526,11 +535,18 @@ fn parse_unified_diff(patch: &str) -> Result<Vec<FileHunks>, String> {
         if hunks.is_empty() {
             return Err(format!("malformed patch: no '@@' hunks found for {}", path));
         }
-        files.push(FileHunks { path, is_create, is_delete, hunks });
+        files.push(FileHunks {
+            path,
+            is_create,
+            is_delete,
+            hunks,
+        });
     }
 
     if files.is_empty() {
-        return Err("no '--- '/'+++ ' file headers found — this doesn't look like a unified diff".into());
+        return Err(
+            "no '--- '/'+++ ' file headers found — this doesn't look like a unified diff".into(),
+        );
     }
     Ok(files)
 }
@@ -602,8 +618,13 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
             let full = resolve_path(workspace, path)?;
             let content = fs::read_to_string(&full).map_err(|e| e.to_string())?;
 
-            let start_line = args.get("start_line").and_then(|v| v.as_u64()).unwrap_or(1).max(1) as usize;
-            let explicit_range = args.get("start_line").is_some() || args.get("num_lines").is_some();
+            let start_line = args
+                .get("start_line")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1)
+                .max(1) as usize;
+            let explicit_range =
+                args.get("start_line").is_some() || args.get("num_lines").is_some();
 
             if explicit_range {
                 let total_lines = content.lines().count();
@@ -620,7 +641,10 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
                     .join("\n");
                 let end_line = (start_line + selected.lines().count()).saturating_sub(1);
                 let body = cap_head_tail(&selected, MAX_TOOL_OUTPUT_CHARS);
-                Ok(format!("[lines {}-{} of {} total]\n{}", start_line, end_line, total_lines, body))
+                Ok(format!(
+                    "[lines {}-{} of {} total]\n{}",
+                    start_line, end_line, total_lines, body
+                ))
             } else if content.chars().count() > MAX_TOOL_OUTPUT_CHARS {
                 let total_lines = content.lines().count();
                 let shown: String = content.chars().take(MAX_TOOL_OUTPUT_CHARS).collect();
@@ -663,16 +687,26 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
             }
 
             let full = resolve_path(workspace, path)?;
-            let mut content = fs::read_to_string(&full)
-                .map_err(|e| format!("reading {}: {} — use write_file to create a new file", path, e))?;
+            let mut content = fs::read_to_string(&full).map_err(|e| {
+                format!(
+                    "reading {}: {} — use write_file to create a new file",
+                    path, e
+                )
+            })?;
 
             for (i, edit) in edits.iter().enumerate() {
                 let old = edit
                     .get("old_string")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| format!("edit {} is missing old_string", i + 1))?;
-                let new = edit.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
-                let replace_all = edit.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+                let new = edit
+                    .get("new_string")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let replace_all = edit
+                    .get("replace_all")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
                 if old.is_empty() {
                     return Err(format!(
@@ -731,7 +765,10 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
                 .and_then(|v| v.as_str())
                 .ok_or("missing query")?;
             let scope = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            let case_sensitive = args.get("case_sensitive").and_then(|v| v.as_bool()).unwrap_or(false);
+            let case_sensitive = args
+                .get("case_sensitive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let file_glob = args.get("file_glob").and_then(|v| v.as_str());
             let max_results = args
                 .get("max_results")
@@ -741,7 +778,11 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
                 .min(2000);
 
             let root = resolve_path(workspace, scope)?;
-            let needle = if case_sensitive { query.to_string() } else { query.to_lowercase() };
+            let needle = if case_sensitive {
+                query.to_string()
+            } else {
+                query.to_lowercase()
+            };
 
             let mut matches: Vec<String> = Vec::new();
             let mut files_scanned = 0usize;
@@ -754,7 +795,10 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
                     return false;
                 }
                 if let Some(glob) = file_glob {
-                    let file_name = file_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    let file_name = file_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
                     if !glob_match(glob, &file_name) {
                         return true;
                     }
@@ -768,7 +812,11 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
                     if matches.len() >= max_results {
                         break;
                     }
-                    let hay = if case_sensitive { line.to_string() } else { line.to_lowercase() };
+                    let hay = if case_sensitive {
+                        line.to_string()
+                    } else {
+                        line.to_lowercase()
+                    };
                     if hay.contains(&needle) {
                         matches.push(format!("{}:{}: {}", rel, line_no + 1, line.trim()));
                     }
@@ -815,7 +863,10 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
                     return false;
                 }
                 let rel = relative_display_path(workspace, file_path);
-                let name = file_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let name = file_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 if glob_match(pattern, &name) || glob_match(pattern, &rel) {
                     found.push(rel);
                 }
@@ -859,8 +910,10 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
             let (working_dir, _is_temp) = if workspace_access {
                 (resolve_path(workspace, ".")?, false)
             } else {
-                let temp_dir = std::env::temp_dir().join(format!("kestrel_python_{}", uuid::Uuid::new_v4()));
-                fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {}", e))?;
+                let temp_dir =
+                    std::env::temp_dir().join(format!("kestrel_python_{}", uuid::Uuid::new_v4()));
+                fs::create_dir_all(&temp_dir)
+                    .map_err(|e| format!("failed to create temp dir: {}", e))?;
                 (temp_dir, true)
             };
 
@@ -878,7 +931,14 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
 fn tokio_shell_command(command: &str) -> tokio::process::Command {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let mut cmd = tokio::process::Command::new("powershell");
-    cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command]);
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        command,
+    ]);
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
 }
@@ -939,10 +999,7 @@ async fn docker_available() -> bool {
     {
         cmd.creation_flags(0x0800_0000);
     }
-    cmd.status()
-        .await
-        .map(|s| s.success())
-        .unwrap_or(false)
+    cmd.status().await.map(|s| s.success()).unwrap_or(false)
 }
 
 /// Builds the sandboxed variant of the command: the workspace bind-mounted
@@ -951,14 +1008,32 @@ async fn docker_available() -> bool {
 /// and a conservative resource cap so a runaway process inside the sandbox
 /// can't take down the host. `--rm` so nothing lingers after the command
 /// (or the timeout-kill) ends.
-fn sandboxed_shell_command(command: &str, workspace: &str, network: bool) -> tokio::process::Command {
+fn sandboxed_shell_command(
+    command: &str,
+    workspace: &str,
+    network: bool,
+) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new("docker");
     cmd.args(["run", "--rm", "-i"]);
     if !network {
         cmd.args(["--network", "none"]);
     }
-    cmd.args(["--cap-drop", "ALL", "--memory", "2g", "--cpus", "2", "--pids-limit", "512"]);
-    cmd.args(["-v", &format!("{}:/workspace", workspace), "-w", "/workspace"]);
+    cmd.args([
+        "--cap-drop",
+        "ALL",
+        "--memory",
+        "2g",
+        "--cpus",
+        "2",
+        "--pids-limit",
+        "512",
+    ]);
+    cmd.args([
+        "-v",
+        &format!("{}:/workspace", workspace),
+        "-w",
+        "/workspace",
+    ]);
     cmd.arg(SANDBOX_IMAGE);
     cmd.args(["sh", "-c", command]);
     #[cfg(target_os = "windows")]
@@ -1045,12 +1120,20 @@ pub async fn run_shell_async(
     let (stdout, stdout_total) = stdout_task.await.unwrap_or_default();
     let (stderr, stderr_total) = stderr_task.await.unwrap_or_default();
     let stdout = if stdout_total > stdout.len() {
-        format!("{}\n... [{} more characters omitted]", stdout, stdout_total - stdout.len())
+        format!(
+            "{}\n... [{} more characters omitted]",
+            stdout,
+            stdout_total - stdout.len()
+        )
     } else {
         stdout
     };
     let stderr = if stderr_total > stderr.len() {
-        format!("{}\n... [{} more characters omitted]", stderr, stderr_total - stderr.len())
+        format!(
+            "{}\n... [{} more characters omitted]",
+            stderr,
+            stderr_total - stderr.len()
+        )
     } else {
         stderr
     };
@@ -1100,7 +1183,9 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
     } else if check_version("python") {
         "python"
     } else {
-        return Err("Python interpreter ('python3' or 'python') not found on system PATH.".to_string());
+        return Err(
+            "Python interpreter ('python3' or 'python') not found on system PATH.".to_string(),
+        );
     };
 
     let mut cmd = Command::new(python_bin);
@@ -1118,7 +1203,9 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd.spawn().map_err(|e| format!("failed to spawn python process: {}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn python process: {}", e))?;
 
     let timeout = Duration::from_secs(30);
     let start = Instant::now();
@@ -1126,7 +1213,9 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let output = child.wait_with_output().map_err(|e| format!("failed to read python output: {}", e))?;
+                let output = child
+                    .wait_with_output()
+                    .map_err(|e| format!("failed to read python output: {}", e))?;
                 let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -1148,9 +1237,15 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
                             if let Ok(meta) = path.metadata() {
                                 if meta.len() > 0 {
                                     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                                        if matches!(ext.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp" | "svg") {
-                                            if path.file_name().and_then(|n| n.to_str()) != Some("script.py") {
-                                                generated_artifacts.push(path.to_string_lossy().to_string());
+                                        if matches!(
+                                            ext.to_lowercase().as_str(),
+                                            "png" | "jpg" | "jpeg" | "webp" | "svg"
+                                        ) {
+                                            if path.file_name().and_then(|n| n.to_str())
+                                                != Some("script.py")
+                                            {
+                                                generated_artifacts
+                                                    .push(path.to_string_lossy().to_string());
                                             }
                                         }
                                     }
@@ -1160,7 +1255,10 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
                     }
                 }
 
-                let mut res = format!("Exit status: {}\nstdout:\n{}\nstderr:\n{}", status, stdout, stderr);
+                let mut res = format!(
+                    "Exit status: {}\nstdout:\n{}\nstderr:\n{}",
+                    status, stdout, stderr
+                );
                 if !generated_artifacts.is_empty() {
                     res.push_str("\nGenerated image artifacts:\n");
                     for artifact in generated_artifacts {

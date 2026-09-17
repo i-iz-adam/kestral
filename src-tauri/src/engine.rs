@@ -23,7 +23,11 @@ pub struct EngineHandle {
 
 impl Default for EngineHandle {
     fn default() -> Self {
-        EngineHandle { child: None, status: EngineStatus::Stopped, last_error: None }
+        EngineHandle {
+            child: None,
+            status: EngineStatus::Stopped,
+            last_error: None,
+        }
     }
 }
 
@@ -96,7 +100,10 @@ pub async fn install(app_handle: tauri::AppHandle) {
     if let Err(e) = std::fs::create_dir_all(&dir) {
         let _ = app_handle.emit(
             "engine://install-done",
-            InstallDoneEvent { success: false, error: Some(e.to_string()) },
+            InstallDoneEvent {
+                success: false,
+                error: Some(e.to_string()),
+            },
         );
         return;
     }
@@ -123,7 +130,10 @@ pub async fn install(app_handle: tauri::AppHandle) {
         Err(e) => {
             let _ = app_handle.emit(
                 "engine://install-done",
-                InstallDoneEvent { success: false, error: Some(e.to_string()) },
+                InstallDoneEvent {
+                    success: false,
+                    error: Some(e.to_string()),
+                },
             );
             return;
         }
@@ -153,8 +163,13 @@ pub async fn install(app_handle: tauri::AppHandle) {
             let mut cfg = crate::config::load_engine_config(&app_handle);
             cfg.use_local_install = true;
             let _ = crate::config::save_engine_config(&app_handle, &cfg);
-            let _ = app_handle
-                .emit("engine://install-done", InstallDoneEvent { success: true, error: None });
+            let _ = app_handle.emit(
+                "engine://install-done",
+                InstallDoneEvent {
+                    success: true,
+                    error: None,
+                },
+            );
         }
         Ok(status) => {
             let _ = app_handle.emit(
@@ -168,7 +183,10 @@ pub async fn install(app_handle: tauri::AppHandle) {
         Err(e) => {
             let _ = app_handle.emit(
                 "engine://install-done",
-                InstallDoneEvent { success: false, error: Some(e.to_string()) },
+                InstallDoneEvent {
+                    success: false,
+                    error: Some(e.to_string()),
+                },
             );
         }
     }

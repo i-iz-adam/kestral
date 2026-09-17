@@ -73,7 +73,11 @@ pub fn load(app_handle: &tauri::AppHandle, session_id: &str) -> Vec<PlanItem> {
         .unwrap_or_default()
 }
 
-pub fn save(app_handle: &tauri::AppHandle, session_id: &str, items: &[PlanItem]) -> Result<(), String> {
+pub fn save(
+    app_handle: &tauri::AppHandle,
+    session_id: &str,
+    items: &[PlanItem],
+) -> Result<(), String> {
     let path = plans_dir(app_handle).join(format!("{}.json", session_id));
     let data = serde_json::to_string_pretty(items).map_err(|e| e.to_string())?;
     fs::write(path, data).map_err(|e| e.to_string())
@@ -105,7 +109,12 @@ pub fn render(items: &[PlanItem]) -> Option<String> {
 /// Handles update_plan if `name` matches, else returns None so the caller
 /// can fall through to the next handler — same convention as
 /// skills::maybe_execute.
-pub fn maybe_execute(app_handle: &tauri::AppHandle, session_id: &str, name: &str, args: &Value) -> Option<Result<String, String>> {
+pub fn maybe_execute(
+    app_handle: &tauri::AppHandle,
+    session_id: &str,
+    name: &str,
+    args: &Value,
+) -> Option<Result<String, String>> {
     if name != "update_plan" {
         return None;
     }
@@ -135,7 +144,11 @@ pub fn maybe_execute(app_handle: &tauri::AppHandle, session_id: &str, name: &str
         json!({ "session_id": session_id, "items": items }),
     );
     let done = items.iter().filter(|i| i.status == "completed").count();
-    Some(Ok(format!("Plan updated: {} step(s), {} completed.", items.len(), done)))
+    Some(Ok(format!(
+        "Plan updated: {} step(s), {} completed.",
+        items.len(),
+        done
+    )))
 }
 
 #[tauri::command]

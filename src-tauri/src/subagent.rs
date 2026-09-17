@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::agent::{self, PendingApprovals, StopRequests, SessionStop, LoopDetector};
+use crate::agent::{self, LoopDetector, PendingApprovals, SessionStop, StopRequests};
 use crate::config;
 use crate::context;
 use crate::github;
@@ -56,13 +56,25 @@ pub(crate) async fn run(
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
     let model = agent::effective_model(&cfg);
 
-    let mut messages = vec![
-        ChatMessage {
-            role: "system".into(),
-            content: Some(prompts::SUBAGENT_SYSTEM_PROMPT.to_string()),
-            ..Default::default()
+    let mut messages = vec![ChatMessage {
+        role: "system".into(),
+        content: Some(prompts::SUBAGENT_SYSTEM_PROMPT.to_string()),
+        ..Default::default()
+    }];
+
+    if let Some(directives) = skills::format_directives(&skills::read_directives(
+        if session.workspace.trim().is_empty() {
+            None
+        } else {
+            Some(session.workspace.as_str())
         },
-    ];
+    )) {
+        messages.push(ChatMessage {
+            role: "system".into(),
+            content: Some(directives),
+            ..Default::default()
+        });
+    }
 
     // Same auto-loading the top-level turn does (see agent.rs::run_turn_inner)
     // keyed off the sub-agent's own task text, since that's this loop's
@@ -70,11 +82,17 @@ pub(crate) async fn run(
     // the parser" should get the testing skill without needing to
     // remember list_skills/read_skill exist any more than the parent does.
     // Each unique skill is loaded into the sub-agent context at most once.
-    let workspace = if session.workspace.trim().is_empty() { None } else { Some(session.workspace.as_str()) };
+    let workspace = if session.workspace.trim().is_empty() {
+        None
+    } else {
+        Some(session.workspace.as_str())
+    };
     let mut subagent_loaded_skills = std::collections::HashSet::new();
     let mut subagent_matched = skills::find_relevant(app_handle, task, workspace);
-    let already: std::collections::HashSet<String> = subagent_matched.iter().map(|s| s.id.clone()).collect();
-    subagent_matched.extend(skills::find_relevant_ai(app_handle, &cfg, workspace, task, &already).await);
+    let already: std::collections::HashSet<String> =
+        subagent_matched.iter().map(|s| s.id.clone()).collect();
+    subagent_matched
+        .extend(skills::find_relevant_ai(app_handle, &cfg, workspace, task, &already).await);
     for skill in subagent_matched {
         if subagent_loaded_skills.insert(skill.id.clone()) {
             if let Some(content) = skills::get_content(app_handle, &skill.id, workspace) {
@@ -102,7 +120,11 @@ pub(crate) async fn run(
     // knows what's already been marked done rather than re-deriving it
     // from scratch, and can check steps off as it completes them too.
     if let Some(plan_text) = plan::render(&plan::load(app_handle, &session.id)) {
-        messages.push(ChatMessage { role: "system".into(), content: Some(plan_text), ..Default::default() });
+        messages.push(ChatMessage {
+            role: "system".into(),
+            content: Some(plan_text),
+            ..Default::default()
+        });
     }
 
     messages.push(ChatMessage {
@@ -113,11 +135,29 @@ pub(crate) async fn run(
 
     // Same tool surface as the parent, minus delegate_to_subagent itself —
     // sub-agents don't spawn further sub-agents. One level of nesting only.
-    let mut tool_list: Vec<Value> = tools::tool_definitions().as_array().cloned().unwrap_or_default();
-    tool_list.extend(skills::tool_definitions().as_array().cloned().unwrap_or_default());
-    tool_list.extend(plan::tool_definitions().as_array().cloned().unwrap_or_default());
+    let mut tool_list: Vec<Value> = tools::tool_definitions()
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    tool_list.extend(
+        skills::tool_definitions()
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+    );
+    tool_list.extend(
+        plan::tool_definitions()
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+    );
     if github::load_token(app_handle).is_some() {
-        tool_list.extend(github::tool_definitions().as_array().cloned().unwrap_or_default());
+        tool_list.extend(
+            github::tool_definitions()
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        );
     }
     let tools_value = Value::Array(tool_list);
 
@@ -132,7 +172,9 @@ pub(crate) async fn run(
             if !graceful {
                 return Ok("Stopped: interrupted before completing the task".to_string());
             }
-            if messages.iter().any(|m| m.role == "user") && messages.iter().any(|m| m.role == "assistant") {
+            if messages.iter().any(|m| m.role == "user")
+                && messages.iter().any(|m| m.role == "assistant")
+            {
                 let overview_prompt = "The parent agent's chat was stopped while you were working. \
                     Write a concise overview of what you've done so far on this task and what remains, \
                     so the work isn't lost when the chat is continued. Don't run any tools — just \
@@ -162,17 +204,19 @@ pub(crate) async fn run(
         // does, just against this sub-agent's own local `messages`.
         context::maybe_compact(&cfg, &mut messages, false).await;
 
-        let assistant_msg = match omniroute::chat_completion(&cfg, model, &messages, Some(&tools_value)).await {
-            Ok(m) => m,
-            Err(e) if context::is_context_length_error(&e) => {
-                if context::maybe_compact(&cfg, &mut messages, true).await {
-                    omniroute::chat_completion(&cfg, model, &messages, Some(&tools_value)).await?
-                } else {
-                    return Err(e);
+        let assistant_msg =
+            match omniroute::chat_completion(&cfg, model, &messages, Some(&tools_value)).await {
+                Ok(m) => m,
+                Err(e) if context::is_context_length_error(&e) => {
+                    if context::maybe_compact(&cfg, &mut messages, true).await {
+                        omniroute::chat_completion(&cfg, model, &messages, Some(&tools_value))
+                            .await?
+                    } else {
+                        return Err(e);
+                    }
                 }
-            }
-            Err(e) => return Err(e),
-        };
+                Err(e) => return Err(e),
+            };
         messages.push(assistant_msg.clone());
 
         if let Some(ref content) = assistant_msg.content {

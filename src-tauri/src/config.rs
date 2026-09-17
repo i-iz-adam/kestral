@@ -179,7 +179,10 @@ pub fn save_models_cache(
         models: models.to_vec(),
         fetched_at,
     };
-    fs::write(models_cache_path(app_handle), serde_json::to_string_pretty(&cache)?)?;
+    fs::write(
+        models_cache_path(app_handle),
+        serde_json::to_string_pretty(&cache)?,
+    )?;
     Ok(cache)
 }
 
@@ -258,7 +261,9 @@ pub fn add_workspace(
     }
     let workspace = Workspace {
         id: uuid::Uuid::new_v4().to_string(),
-        name: name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| folder_name(&path)),
+        name: name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| folder_name(&path)),
         path,
     };
     list.push(workspace.clone());
@@ -313,7 +318,10 @@ pub fn load_engine_config(app_handle: &tauri::AppHandle) -> EngineConfig {
         .unwrap_or_default()
 }
 
-pub fn save_engine_config(app_handle: &tauri::AppHandle, cfg: &EngineConfig) -> std::io::Result<()> {
+pub fn save_engine_config(
+    app_handle: &tauri::AppHandle,
+    cfg: &EngineConfig,
+) -> std::io::Result<()> {
     let path = app_config_dir(app_handle).join("engine_config.json");
     fs::write(path, serde_json::to_string_pretty(cfg)?)
 }

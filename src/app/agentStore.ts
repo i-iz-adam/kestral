@@ -238,6 +238,82 @@ export function pushSystemNote(sessionId: string, text: string) {
   });
 }
 
+// Pending deltas and tool updates buffered before being flushed to records / store state.
+// Batched flushing via requestAnimationFrame (or 16ms timer fallback) prevents high-frequency
+// token streaming or subagent log events from causing excessive React re-renders.
+
+interface PendingDelta {
+  sessionId: string;
+  requestId: string;
+  delta: string;
+}
+
+const pendingDeltas: PendingDelta[] = [];
+let animFrameId: number | null = null;
+
+function scheduleFlush() {
+  if (animFrameId !== null) return;
+  const runner = typeof requestAnimationFrame !== "undefined"
+    ? requestAnimationFrame
+    : (cb: () => void) => setTimeout(cb, 16) as unknown as number;
+
+  animFrameId = runner(flushDeltas);
+}
+
+function removePendingDeltas(sessionId: string, requestId?: string) {
+  for (let i = pendingDeltas.length - 1; i >= 0; i--) {
+    const pending = pendingDeltas[i];
+    if (pending.sessionId === sessionId && (!requestId || pending.requestId === requestId)) {
+      pendingDeltas.splice(i, 1);
+    }
+  }
+}
+
+export function flushDeltas() {
+  animFrameId = null;
+  if (pendingDeltas.length === 0) return;
+
+  // Group pending deltas by session and request. Keep a request's entries in
+  // the queue when its start event has not arrived yet; Tauri preserves event
+  // ordering, but retaining them also makes this safe across webview stalls.
+  const updatesBySession = new Map<string, Map<string, string>>();
+  for (const { sessionId, requestId, delta } of pendingDeltas) {
+    let sessMap = updatesBySession.get(sessionId);
+    if (!sessMap) {
+      sessMap = new Map<string, string>();
+      updatesBySession.set(sessionId, sessMap);
+    }
+    const cur = sessMap.get(requestId) ?? "";
+    sessMap.set(requestId, cur + delta);
+  }
+  pendingDeltas.length = 0;
+  const unapplied: PendingDelta[] = [];
+
+  for (const [sessionId, reqMap] of updatesBySession) {
+    const rec = getRecord(sessionId);
+    let timelineChanged = false;
+    const timeline = [...rec.timeline];
+
+    for (const [requestId, accumulatedDelta] of reqMap) {
+      const idx = timeline.findIndex(
+        (t) => t.kind === "message" && t.requestId === requestId
+      );
+      if (idx === -1) {
+        unapplied.push({ sessionId, requestId, delta: accumulatedDelta });
+        continue;
+      }
+      const item = timeline[idx] as Extract<TimelineItem, { kind: "message" }>;
+      timeline[idx] = { ...item, content: item.content + accumulatedDelta };
+      timelineChanged = true;
+    }
+
+    if (timelineChanged) {
+      patch(sessionId, { timeline });
+    }
+  }
+  pendingDeltas.push(...unapplied);
+}
+
 let started = false;
 
 /** Registers the global Tauri event listeners exactly once for the life
@@ -279,6 +355,7 @@ export function ensureAgentEventsStarted() {
   });
 
   listen<MessageStartEventPayload>("agent://message-start", (evt) => {
+    flushDeltas();
     const { session_id } = evt.payload;
     const rec = getRecord(session_id);
     patch(session_id, {
@@ -297,19 +374,19 @@ export function ensureAgentEventsStarted() {
   });
 
   listen<MessageDeltaEventPayload>("agent://message-delta", (evt) => {
-    const { session_id } = evt.payload;
-    const rec = getRecord(session_id);
-    const idx = rec.timeline.findIndex(
-      (t) => t.kind === "message" && t.requestId === evt.payload.request_id
-    );
-    if (idx === -1) return;
-    const item = rec.timeline[idx] as Extract<TimelineItem, { kind: "message" }>;
-    const timeline = [...rec.timeline];
-    timeline[idx] = { ...item, content: item.content + evt.payload.delta };
-    patch(session_id, { timeline });
+    pendingDeltas.push({
+      sessionId: evt.payload.session_id,
+      requestId: evt.payload.request_id,
+      delta: evt.payload.delta,
+    });
+    scheduleFlush();
   });
 
+  // A RAF flush is scheduled for each frame. If the frame is delayed by a
+  // busy UI, cancellation/finalization events explicitly flush first so the
+  // persisted final message always wins over any queued preview delta.
   listen<MessageCancelEventPayload>("agent://message-cancel", (evt) => {
+    flushDeltas();
     const { session_id } = evt.payload;
     const rec = getRecord(session_id);
     patch(session_id, {
@@ -317,9 +394,11 @@ export function ensureAgentEventsStarted() {
         (t) => !(t.kind === "message" && t.requestId === evt.payload.request_id)
       ),
     });
+    removePendingDeltas(session_id, evt.payload.request_id);
   });
 
   listen<MessageEventPayload>("agent://message", (evt) => {
+    flushDeltas();
     const { session_id } = evt.payload;
     const rec = getRecord(session_id);
     if (evt.payload.request_id) {
@@ -338,6 +417,7 @@ export function ensureAgentEventsStarted() {
           streaming: false,
         };
         patch(session_id, { timeline });
+        removePendingDeltas(session_id, evt.payload.request_id);
         return;
       }
     }
@@ -354,6 +434,9 @@ export function ensureAgentEventsStarted() {
         },
       ],
     });
+    if (evt.payload.request_id) {
+      removePendingDeltas(session_id, evt.payload.request_id);
+    }
   });
 
   
@@ -369,7 +452,9 @@ export function ensureAgentEventsStarted() {
   });
 
   listen<TurnEndEventPayload>("agent://turn-end", async (evt) => {
+    flushDeltas();
     const { session_id, error, reason } = evt.payload;
+    removePendingDeltas(session_id);
     // Refresh the persisted record first, then clear the live buffer in
     // the same patch — so a subscribed view swaps from "live" to
     // "history" atomically and never flashes an empty gap in between.

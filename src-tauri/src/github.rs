@@ -20,7 +20,9 @@ fn config_path(app_handle: &tauri::AppHandle) -> PathBuf {
 }
 
 pub fn save_token(app_handle: &tauri::AppHandle, token: &str) -> std::io::Result<()> {
-    let cfg = GithubConfig { token: Some(token.to_string()) };
+    let cfg = GithubConfig {
+        token: Some(token.to_string()),
+    };
     fs::write(config_path(app_handle), serde_json::to_string_pretty(&cfg)?)
 }
 
@@ -45,7 +47,11 @@ pub async fn test_token(token: &str) -> Result<String, String> {
         return Err(format!("GitHub returned {}", resp.status()));
     }
     let json: Value = resp.json().await.map_err(|e| e.to_string())?;
-    Ok(json.get("login").and_then(|v| v.as_str()).unwrap_or("unknown").to_string())
+    Ok(json
+        .get("login")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string())
 }
 
 /// The tool schema exposed to the model. Every tool takes optional
@@ -172,7 +178,10 @@ pub fn tool_definitions() -> Value {
 /// Tools that change something on GitHub — gated behind planning-mode
 /// approval the same way write_file/run_shell are.
 pub fn is_mutating(name: &str) -> bool {
-    matches!(name, "github_comment_issue" | "github_close_issue" | "github_merge_pr")
+    matches!(
+        name,
+        "github_comment_issue" | "github_close_issue" | "github_merge_pr"
+    )
 }
 
 /// Owner/repo parsed out of a git remote URL, in any of the shapes
@@ -220,8 +229,14 @@ pub fn repo_for_workspace(workspace: &str) -> Option<(String, String)> {
 }
 
 fn resolve_repo(args: &Value, workspace: &str) -> Result<(String, String), String> {
-    let owner = args.get("owner").and_then(|v| v.as_str()).map(str::to_string);
-    let repo = args.get("repo").and_then(|v| v.as_str()).map(str::to_string);
+    let owner = args
+        .get("owner")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let repo = args
+        .get("repo")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     if let (Some(o), Some(r)) = (owner, repo) {
         return Ok((o, r));
     }
@@ -269,49 +284,108 @@ pub async fn execute(
     match name {
         "github_list_issues" => {
             let (owner, repo) = resolve_repo(args, workspace)?;
-            let url = format!("https://api.github.com/repos/{}/{}/issues?state=open", owner, repo);
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/issues?state=open",
+                owner, repo
+            );
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_get_issue" => {
             let (owner, repo) = resolve_repo(args, workspace)?;
-            let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
-            let url = format!("https://api.github.com/repos/{}/{}/issues/{}", owner, repo, number);
+            let number = args
+                .get("number")
+                .and_then(|v| v.as_i64())
+                .ok_or("missing number")?;
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/issues/{}",
+                owner, repo, number
+            );
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_list_issue_comments" => {
             let (owner, repo) = resolve_repo(args, workspace)?;
-            let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
-            let url = format!("https://api.github.com/repos/{}/{}/issues/{}/comments", owner, repo, number);
+            let number = args
+                .get("number")
+                .and_then(|v| v.as_i64())
+                .ok_or("missing number")?;
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/issues/{}/comments",
+                owner, repo, number
+            );
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_comment_issue" => {
             let (owner, repo) = resolve_repo(args, workspace)?;
-            let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
-            let body = args.get("body").and_then(|v| v.as_str()).ok_or("missing body")?;
-            let url = format!("https://api.github.com/repos/{}/{}/issues/{}/comments", owner, repo, number);
-            request(&client, reqwest::Method::POST, token, &url, Some(json!({ "body": body }))).await
+            let number = args
+                .get("number")
+                .and_then(|v| v.as_i64())
+                .ok_or("missing number")?;
+            let body = args
+                .get("body")
+                .and_then(|v| v.as_str())
+                .ok_or("missing body")?;
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/issues/{}/comments",
+                owner, repo, number
+            );
+            request(
+                &client,
+                reqwest::Method::POST,
+                token,
+                &url,
+                Some(json!({ "body": body })),
+            )
+            .await
         }
         "github_close_issue" => {
             let (owner, repo) = resolve_repo(args, workspace)?;
-            let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
-            let url = format!("https://api.github.com/repos/{}/{}/issues/{}", owner, repo, number);
-            request(&client, reqwest::Method::PATCH, token, &url, Some(json!({ "state": "closed" }))).await
+            let number = args
+                .get("number")
+                .and_then(|v| v.as_i64())
+                .ok_or("missing number")?;
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/issues/{}",
+                owner, repo, number
+            );
+            request(
+                &client,
+                reqwest::Method::PATCH,
+                token,
+                &url,
+                Some(json!({ "state": "closed" })),
+            )
+            .await
         }
         "github_list_open_prs" => {
             let (owner, repo) = resolve_repo(args, workspace)?;
-            let url = format!("https://api.github.com/repos/{}/{}/pulls?state=open", owner, repo);
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/pulls?state=open",
+                owner, repo
+            );
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_get_pr" => {
             let (owner, repo) = resolve_repo(args, workspace)?;
-            let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
-            let url = format!("https://api.github.com/repos/{}/{}/pulls/{}", owner, repo, number);
+            let number = args
+                .get("number")
+                .and_then(|v| v.as_i64())
+                .ok_or("missing number")?;
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/pulls/{}",
+                owner, repo, number
+            );
             request(&client, reqwest::Method::GET, token, &url, None).await
         }
         "github_merge_pr" => {
             let (owner, repo) = resolve_repo(args, workspace)?;
-            let number = args.get("number").and_then(|v| v.as_i64()).ok_or("missing number")?;
-            let url = format!("https://api.github.com/repos/{}/{}/pulls/{}/merge", owner, repo, number);
+            let number = args
+                .get("number")
+                .and_then(|v| v.as_i64())
+                .ok_or("missing number")?;
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/pulls/{}/merge",
+                owner, repo, number
+            );
             request(&client, reqwest::Method::PUT, token, &url, Some(json!({}))).await
         }
         _ => Err(format!("unknown github tool: {}", name)),

@@ -73,7 +73,10 @@ pub fn load_connections(app_handle: &tauri::AppHandle) -> Vec<Connection> {
     connections
 }
 
-pub fn save_connections(app_handle: &tauri::AppHandle, connections: &[Connection]) -> Result<(), String> {
+pub fn save_connections(
+    app_handle: &tauri::AppHandle,
+    connections: &[Connection],
+) -> Result<(), String> {
     let path = config_path(app_handle);
     let store = ConnectionsStore {
         connections: connections.to_vec(),
@@ -133,8 +136,14 @@ pub async fn test_connection(mut connection: Connection) -> Connection {
             match resp {
                 Ok(r) if r.status().is_success() => {
                     if let Ok(json_val) = r.json::<Value>().await {
-                        let username = json_val.get("username").and_then(|v| v.as_str()).unwrap_or("Discord Bot");
-                        let discriminator = json_val.get("discriminator").and_then(|v| v.as_str()).unwrap_or("0");
+                        let username = json_val
+                            .get("username")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Discord Bot");
+                        let discriminator = json_val
+                            .get("discriminator")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("0");
                         let account = if discriminator == "0" || discriminator.is_empty() {
                             username.to_string()
                         } else {
@@ -172,14 +181,23 @@ pub async fn test_connection(mut connection: Connection) -> Connection {
             match resp {
                 Ok(r) if r.status().is_success() => {
                     if let Ok(json_val) = r.json::<Value>().await {
-                        let ok = json_val.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let ok = json_val
+                            .get("ok")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         if ok {
-                            let bot = json_val.get("user").and_then(|v| v.as_str()).unwrap_or("Slack Bot");
+                            let bot = json_val
+                                .get("user")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Slack Bot");
                             let team = json_val.get("team").and_then(|v| v.as_str()).unwrap_or("");
                             connection.status = "connected".to_string();
                             connection.account_name = Some(format!("{} ({})", bot, team));
                         } else {
-                            let err = json_val.get("error").and_then(|v| v.as_str()).unwrap_or("Auth failed");
+                            let err = json_val
+                                .get("error")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Auth failed");
                             connection.status = "error".to_string();
                             connection.account_name = Some(err.to_string());
                         }
@@ -244,7 +262,10 @@ pub async fn test_connection(mut connection: Connection) -> Connection {
             match resp {
                 Ok(r) if r.status().is_success() => {
                     if let Ok(json_val) = r.json::<Value>().await {
-                        let name = json_val.get("name").and_then(|v| v.as_str()).unwrap_or("Notion Bot");
+                        let name = json_val
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Notion Bot");
                         connection.status = "connected".to_string();
                         connection.account_name = Some(name.to_string());
                     } else {
@@ -299,7 +320,11 @@ pub async fn test_connection(mut connection: Connection) -> Connection {
             }
         }
         "webhook" => {
-            let url = connection.config.get("endpoint_url").cloned().unwrap_or_default();
+            let url = connection
+                .config
+                .get("endpoint_url")
+                .cloned()
+                .unwrap_or_default();
             if url.trim().is_empty() {
                 connection.status = "error".to_string();
                 connection.account_name = Some("Missing endpoint URL".to_string());
@@ -320,7 +345,9 @@ fn encode_emoji(emoji: &str) -> String {
     emoji
         .bytes()
         .map(|b| match b {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b':' => (b as char).to_string(),
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b':' => {
+                (b as char).to_string()
+            }
             _ => format!("%{:02X}", b),
         })
         .collect()
@@ -365,18 +392,30 @@ pub async fn execute_connection_action(
     match conn_type.as_str() {
         "discord" => {
             let guild_id = target.config.get("guild_id").cloned().or_else(|| {
-                args.get("guild_id").and_then(|v| v.as_str()).map(|s| s.to_string())
+                args.get("guild_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
             });
             let channel_id = target.config.get("channel_id").cloned().or_else(|| {
-                args.get("channel_id").and_then(|v| v.as_str()).map(|s| s.to_string())
+                args.get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
             });
 
             match action {
                 "create_role" => {
-                    let g_id = guild_id.ok_or("Guild ID is required for creating a Discord role")?;
-                    let role_name = args.get("name").or_else(|| args.get("role_name")).and_then(|v| v.as_str()).unwrap_or("New Role");
+                    let g_id =
+                        guild_id.ok_or("Guild ID is required for creating a Discord role")?;
+                    let role_name = args
+                        .get("name")
+                        .or_else(|| args.get("role_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("New Role");
                     let color = args.get("color").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let permissions = args.get("permissions").and_then(|v| v.as_str()).unwrap_or("0");
+                    let permissions = args
+                        .get("permissions")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("0");
                     let url = format!("https://discord.com/api/v10/guilds/{}/roles", g_id);
                     let resp = client
                         .post(&url)
@@ -395,9 +434,20 @@ pub async fn execute_connection_action(
                 }
                 "delete_role" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let role_id = args.get("role_id").and_then(|v| v.as_str()).ok_or("role_id is required")?;
-                    let url = format!("https://discord.com/api/v10/guilds/{}/roles/{}", g_id, role_id);
-                    let resp = client.delete(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let role_id = args
+                        .get("role_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("role_id is required")?;
+                    let url = format!(
+                        "https://discord.com/api/v10/guilds/{}/roles/{}",
+                        g_id, role_id
+                    );
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "list_roles" => {
@@ -412,7 +462,8 @@ pub async fn execute_connection_action(
                     handle_discord_response(resp).await
                 }
                 "list_channels" => {
-                    let g_id = guild_id.ok_or("Guild ID is required for listing Discord channels")?;
+                    let g_id =
+                        guild_id.ok_or("Guild ID is required for listing Discord channels")?;
                     let url = format!("https://discord.com/api/v10/guilds/{}/channels", g_id);
                     let resp = client
                         .get(&url)
@@ -425,41 +476,84 @@ pub async fn execute_connection_action(
                 "get_channel" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
                     let url = format!("https://discord.com/api/v10/channels/{}", c_id);
-                    let resp = client.get(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "create_channel" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let name = args.get("name").or_else(|| args.get("channel_name")).and_then(|v| v.as_str()).ok_or("channel name is required")?;
+                    let name = args
+                        .get("name")
+                        .or_else(|| args.get("channel_name"))
+                        .and_then(|v| v.as_str())
+                        .ok_or("channel name is required")?;
                     let c_type = args.get("type").and_then(|v| v.as_u64()).unwrap_or(0);
                     let topic = args.get("topic").and_then(|v| v.as_str());
                     let parent_id = args.get("parent_id").and_then(|v| v.as_str());
                     let mut body = json!({ "name": name, "type": c_type });
-                    if let Some(t) = topic { body["topic"] = json!(t); }
-                    if let Some(p) = parent_id { body["parent_id"] = json!(p); }
+                    if let Some(t) = topic {
+                        body["topic"] = json!(t);
+                    }
+                    if let Some(p) = parent_id {
+                        body["parent_id"] = json!(p);
+                    }
                     let url = format!("https://discord.com/api/v10/guilds/{}/channels", g_id);
-                    let resp = client.post(&url).header("Authorization", format!("Bot {}", token.trim())).header("Content-Type", "application/json").json(&body).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .post(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "delete_channel" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
                     let url = format!("https://discord.com/api/v10/channels/{}", c_id);
-                    let resp = client.delete(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "edit_channel" | "set_channel_topic" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
                     let mut body = json!({});
-                    if let Some(name) = args.get("name").and_then(|v| v.as_str()) { body["name"] = json!(name); }
-                    if let Some(topic) = args.get("topic").and_then(|v| v.as_str()) { body["topic"] = json!(topic); }
-                    if let Some(nsfw) = args.get("nsfw").and_then(|v| v.as_bool()) { body["nsfw"] = json!(nsfw); }
+                    if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
+                        body["name"] = json!(name);
+                    }
+                    if let Some(topic) = args.get("topic").and_then(|v| v.as_str()) {
+                        body["topic"] = json!(topic);
+                    }
+                    if let Some(nsfw) = args.get("nsfw").and_then(|v| v.as_bool()) {
+                        body["nsfw"] = json!(nsfw);
+                    }
                     let url = format!("https://discord.com/api/v10/channels/{}", c_id);
-                    let resp = client.patch(&url).header("Authorization", format!("Bot {}", token.trim())).header("Content-Type", "application/json").json(&body).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .patch(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "send_message" => {
-                    let c_id = channel_id.ok_or("Channel ID is required for sending a Discord message")?;
-                    let content = args.get("content").or_else(|| args.get("message")).and_then(|v| v.as_str()).unwrap_or("");
+                    let c_id =
+                        channel_id.ok_or("Channel ID is required for sending a Discord message")?;
+                    let content = args
+                        .get("content")
+                        .or_else(|| args.get("message"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     let url = format!("https://discord.com/api/v10/channels/{}/messages", c_id);
                     let resp = client
                         .post(&url)
@@ -473,158 +567,375 @@ pub async fn execute_connection_action(
                 }
                 "delete_message" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
-                    let m_id = args.get("message_id").and_then(|v| v.as_str()).ok_or("message_id is required")?;
-                    let url = format!("https://discord.com/api/v10/channels/{}/messages/{}", c_id, m_id);
-                    let resp = client.delete(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let m_id = args
+                        .get("message_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("message_id is required")?;
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/messages/{}",
+                        c_id, m_id
+                    );
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "edit_message" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
-                    let m_id = args.get("message_id").and_then(|v| v.as_str()).ok_or("message_id is required")?;
-                    let content = args.get("content").or_else(|| args.get("message")).and_then(|v| v.as_str()).unwrap_or("");
-                    let url = format!("https://discord.com/api/v10/channels/{}/messages/{}", c_id, m_id);
-                    let resp = client.patch(&url).header("Authorization", format!("Bot {}", token.trim())).header("Content-Type", "application/json").json(&json!({ "content": content })).send().await.map_err(|e| e.to_string())?;
+                    let m_id = args
+                        .get("message_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("message_id is required")?;
+                    let content = args
+                        .get("content")
+                        .or_else(|| args.get("message"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/messages/{}",
+                        c_id, m_id
+                    );
+                    let resp = client
+                        .patch(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&json!({ "content": content }))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "get_messages" | "list_messages" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
                     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50);
-                    let url = format!("https://discord.com/api/v10/channels/{}/messages?limit={}", c_id, limit);
-                    let resp = client.get(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/messages?limit={}",
+                        c_id, limit
+                    );
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "pin_message" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
-                    let m_id = args.get("message_id").and_then(|v| v.as_str()).ok_or("message_id is required")?;
-                    let url = format!("https://discord.com/api/v10/channels/{}/pins/{}", c_id, m_id);
-                    let resp = client.put(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let m_id = args
+                        .get("message_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("message_id is required")?;
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/pins/{}",
+                        c_id, m_id
+                    );
+                    let resp = client
+                        .put(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "unpin_message" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
-                    let m_id = args.get("message_id").and_then(|v| v.as_str()).ok_or("message_id is required")?;
-                    let url = format!("https://discord.com/api/v10/channels/{}/pins/{}", c_id, m_id);
-                    let resp = client.delete(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let m_id = args
+                        .get("message_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("message_id is required")?;
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/pins/{}",
+                        c_id, m_id
+                    );
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "list_pins" | "get_pinned_messages" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
                     let url = format!("https://discord.com/api/v10/channels/{}/pins", c_id);
-                    let resp = client.get(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "add_reaction" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
-                    let m_id = args.get("message_id").and_then(|v| v.as_str()).ok_or("message_id is required")?;
-                    let emoji = args.get("emoji").and_then(|v| v.as_str()).ok_or("emoji is required")?;
+                    let m_id = args
+                        .get("message_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("message_id is required")?;
+                    let emoji = args
+                        .get("emoji")
+                        .and_then(|v| v.as_str())
+                        .ok_or("emoji is required")?;
                     let encoded_emoji = encode_emoji(emoji);
-                    let url = format!("https://discord.com/api/v10/channels/{}/messages/{}/reactions/{}/@me", c_id, m_id, encoded_emoji);
-                    let resp = client.put(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/messages/{}/reactions/{}/@me",
+                        c_id, m_id, encoded_emoji
+                    );
+                    let resp = client
+                        .put(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "delete_reaction" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
-                    let m_id = args.get("message_id").and_then(|v| v.as_str()).ok_or("message_id is required")?;
-                    let emoji = args.get("emoji").and_then(|v| v.as_str()).ok_or("emoji is required")?;
-                    let target_user = args.get("user_id").and_then(|v| v.as_str()).unwrap_or("@me");
+                    let m_id = args
+                        .get("message_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("message_id is required")?;
+                    let emoji = args
+                        .get("emoji")
+                        .and_then(|v| v.as_str())
+                        .ok_or("emoji is required")?;
+                    let target_user = args
+                        .get("user_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("@me");
                     let encoded_emoji = encode_emoji(emoji);
-                    let url = format!("https://discord.com/api/v10/channels/{}/messages/{}/reactions/{}/{}", c_id, m_id, encoded_emoji, target_user);
-                    let resp = client.delete(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/messages/{}/reactions/{}/{}",
+                        c_id, m_id, encoded_emoji, target_user
+                    );
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "list_members" | "list_guild_members" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
                     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(1000);
-                    let url = format!("https://discord.com/api/v10/guilds/{}/members?limit={}", g_id, limit);
-                    let resp = client.get(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let url = format!(
+                        "https://discord.com/api/v10/guilds/{}/members?limit={}",
+                        g_id, limit
+                    );
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "get_member" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let u_id = args.get("user_id").and_then(|v| v.as_str()).ok_or("user_id is required")?;
-                    let url = format!("https://discord.com/api/v10/guilds/{}/members/{}", g_id, u_id);
-                    let resp = client.get(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let u_id = args
+                        .get("user_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("user_id is required")?;
+                    let url = format!(
+                        "https://discord.com/api/v10/guilds/{}/members/{}",
+                        g_id, u_id
+                    );
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "kick_member" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let u_id = args.get("user_id").and_then(|v| v.as_str()).ok_or("user_id is required")?;
-                    let url = format!("https://discord.com/api/v10/guilds/{}/members/{}", g_id, u_id);
-                    let resp = client.delete(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let u_id = args
+                        .get("user_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("user_id is required")?;
+                    let url = format!(
+                        "https://discord.com/api/v10/guilds/{}/members/{}",
+                        g_id, u_id
+                    );
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "ban_member" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let u_id = args.get("user_id").and_then(|v| v.as_str()).ok_or("user_id is required")?;
-                    let delete_secs = args.get("delete_message_seconds").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let u_id = args
+                        .get("user_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("user_id is required")?;
+                    let delete_secs = args
+                        .get("delete_message_seconds")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
                     let url = format!("https://discord.com/api/v10/guilds/{}/bans/{}", g_id, u_id);
-                    let resp = client.put(&url).header("Authorization", format!("Bot {}", token.trim())).header("Content-Type", "application/json").json(&json!({ "delete_message_seconds": delete_secs })).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .put(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&json!({ "delete_message_seconds": delete_secs }))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "unban_member" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let u_id = args.get("user_id").and_then(|v| v.as_str()).ok_or("user_id is required")?;
+                    let u_id = args
+                        .get("user_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("user_id is required")?;
                     let url = format!("https://discord.com/api/v10/guilds/{}/bans/{}", g_id, u_id);
-                    let resp = client.delete(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "list_bans" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
                     let url = format!("https://discord.com/api/v10/guilds/{}/bans", g_id);
-                    let resp = client.get(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "assign_role" | "add_member_role" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let u_id = args.get("user_id").and_then(|v| v.as_str()).ok_or("user_id is required")?;
-                    let r_id = args.get("role_id").and_then(|v| v.as_str()).ok_or("role_id is required")?;
-                    let url = format!("https://discord.com/api/v10/guilds/{}/members/{}/roles/{}", g_id, u_id, r_id);
-                    let resp = client.put(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let u_id = args
+                        .get("user_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("user_id is required")?;
+                    let r_id = args
+                        .get("role_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("role_id is required")?;
+                    let url = format!(
+                        "https://discord.com/api/v10/guilds/{}/members/{}/roles/{}",
+                        g_id, u_id, r_id
+                    );
+                    let resp = client
+                        .put(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "remove_member_role" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let u_id = args.get("user_id").and_then(|v| v.as_str()).ok_or("user_id is required")?;
-                    let r_id = args.get("role_id").and_then(|v| v.as_str()).ok_or("role_id is required")?;
-                    let url = format!("https://discord.com/api/v10/guilds/{}/members/{}/roles/{}", g_id, u_id, r_id);
-                    let resp = client.delete(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let u_id = args
+                        .get("user_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("user_id is required")?;
+                    let r_id = args
+                        .get("role_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or("role_id is required")?;
+                    let url = format!(
+                        "https://discord.com/api/v10/guilds/{}/members/{}/roles/{}",
+                        g_id, u_id, r_id
+                    );
+                    let resp = client
+                        .delete(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "get_guild" | "get_server" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
-                    let url = format!("https://discord.com/api/v10/guilds/{}?with_counts=true", g_id);
-                    let resp = client.get(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let url = format!(
+                        "https://discord.com/api/v10/guilds/{}?with_counts=true",
+                        g_id
+                    );
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 "create_thread" => {
                     let c_id = channel_id.ok_or("Channel ID is required")?;
-                    let name = args.get("name").and_then(|v| v.as_str()).ok_or("thread name is required")?;
+                    let name = args
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .ok_or("thread name is required")?;
                     if let Some(m_id) = args.get("message_id").and_then(|v| v.as_str()) {
-                        let url = format!("https://discord.com/api/v10/channels/{}/messages/{}/threads", c_id, m_id);
-                        let resp = client.post(&url).header("Authorization", format!("Bot {}", token.trim())).header("Content-Type", "application/json").json(&json!({ "name": name })).send().await.map_err(|e| e.to_string())?;
+                        let url = format!(
+                            "https://discord.com/api/v10/channels/{}/messages/{}/threads",
+                            c_id, m_id
+                        );
+                        let resp = client
+                            .post(&url)
+                            .header("Authorization", format!("Bot {}", token.trim()))
+                            .header("Content-Type", "application/json")
+                            .json(&json!({ "name": name }))
+                            .send()
+                            .await
+                            .map_err(|e| e.to_string())?;
                         handle_discord_response(resp).await
                     } else {
                         let url = format!("https://discord.com/api/v10/channels/{}/threads", c_id);
-                        let resp = client.post(&url).header("Authorization", format!("Bot {}", token.trim())).header("Content-Type", "application/json").json(&json!({ "name": name, "type": 11 })).send().await.map_err(|e| e.to_string())?;
+                        let resp = client
+                            .post(&url)
+                            .header("Authorization", format!("Bot {}", token.trim()))
+                            .header("Content-Type", "application/json")
+                            .json(&json!({ "name": name, "type": 11 }))
+                            .send()
+                            .await
+                            .map_err(|e| e.to_string())?;
                         handle_discord_response(resp).await
                     }
                 }
                 "list_threads" => {
                     let g_id = guild_id.ok_or("Guild ID is required")?;
                     let url = format!("https://discord.com/api/v10/guilds/{}/threads/active", g_id);
-                    let resp = client.get(&url).header("Authorization", format!("Bot {}", token.trim())).send().await.map_err(|e| e.to_string())?;
+                    let resp = client
+                        .get(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
                 _ => Err(format!("Unsupported Discord action: {}", action)),
             }
         }
         "github" => {
-            let workspace = args.get("workspace").and_then(|v| v.as_str()).unwrap_or(".");
+            let workspace = args
+                .get("workspace")
+                .and_then(|v| v.as_str())
+                .unwrap_or(".");
             let raw = github::execute(&token, workspace, action, &args).await?;
             serde_json::from_str(&raw).map_err(|e| e.to_string())
         }
         "webhook" => {
-            let endpoint = target.config.get("endpoint_url").ok_or("Missing endpoint_url")?;
+            let endpoint = target
+                .config
+                .get("endpoint_url")
+                .ok_or("Missing endpoint_url")?;
             let resp = client
                 .post(endpoint)
                 .header("Content-Type", "application/json")
@@ -636,7 +947,10 @@ pub async fn execute_connection_action(
             let text = resp.text().await.unwrap_or_default();
             Ok(json!({ "response": text }))
         }
-        _ => Err(format!("Execution for connection type '{}' is not implemented", conn_type)),
+        _ => Err(format!(
+            "Execution for connection type '{}' is not implemented",
+            conn_type
+        )),
     }
 }
 

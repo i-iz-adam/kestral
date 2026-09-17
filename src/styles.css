@@ -1285,6 +1285,60 @@ button:not(:disabled):hover {
   font-size: 16px;
 }
 
+.session-diff-open {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.session-diff-open:hover { color: var(--text); border-color: var(--accent); }
+
+.session-diff-modal { width: 960px; max-width: 94vw; max-height: 88vh; }
+.session-diff-modal .modal-body { overflow: auto; }
+
+.session-diff-toolbar, .session-diff-actions, .session-diff-selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.session-diff-toolbar { margin-bottom: 12px; }
+.session-diff-scope { display: flex; gap: 4px; }
+.session-diff-scope button, .session-diff-actions button {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2, transparent);
+  color: var(--muted);
+  padding: 5px 9px;
+  cursor: pointer;
+}
+.session-diff-scope button.active { color: var(--text); border-color: var(--accent); background: var(--accent-glow); }
+.session-diff-scope button:disabled { opacity: .45; cursor: not-allowed; }
+.session-diff-layout { display: flex; min-height: 390px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.session-diff-files { width: 245px; flex-shrink: 0; border-right: 1px solid var(--border); overflow: auto; }
+.session-diff-selection { padding: 9px 10px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--border); }
+.link-button { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; font-size: 11px; }
+.session-diff-file { display: flex; gap: 7px; padding: 8px 9px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); cursor: pointer; }
+.session-diff-file.active { background: var(--accent-glow); }
+.session-diff-file input { margin-top: 3px; accent-color: var(--accent); }
+.session-diff-file-name { min-width: 0; flex: 1; overflow: hidden; text-align: left; white-space: nowrap; text-overflow: ellipsis; border: 0; background: none; color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
+.session-diff-file-name small { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
+.session-diff-status { display: inline-block; width: 22px; color: var(--gold); font-weight: 600; }
+.session-diff-preview { flex: 1; min-width: 0; overflow: auto; background: var(--surface, #111); }
+.session-diff-preview-title { padding: 9px 12px; color: var(--muted); font-family: monospace; font-size: 12px; border-bottom: 1px solid var(--border); }
+.session-diff-code { min-width: max-content; margin: 0; border: 0; border-radius: 0; }
+.session-diff-actions { margin-top: 12px; color: var(--muted); font-size: 11px; }
+.session-diff-actions > div { display: flex; gap: 6px; }
+.session-diff-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.session-diff-actions .danger { color: var(--danger); }
+.session-diff-empty { padding: 32px 12px; color: var(--muted); text-align: center; }
+.session-diff-error { margin-bottom: 10px; padding: 8px 10px; color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); border-radius: 5px; font-size: 12px; }
+
 .message-list {
   flex: 1;
   overflow-y: auto;

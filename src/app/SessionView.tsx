@@ -22,6 +22,7 @@ import {
 } from "./agentStore";
 import { useAgentSession } from "./useAgentSession";
 import PlanDrawer from "./PlanDrawer";
+import SessionDiffViewer from "./SessionDiffViewer";
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
   // Live turn state (timeline/liveCalls/sending) and the persisted session
@@ -32,6 +33,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [slashIndex, setSlashIndex] = useState(0);
   const [activeSubagentId, setActiveSubagentId] = useState<string | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -363,7 +365,11 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
         />
         <h2>{session.title}</h2>
         <span className="session-usage-badge">⚡ {session.messages.length} msgs</span> <span className="hint">{session.mode}</span>
+        <button type="button" className="session-diff-open" onClick={() => setShowDiff(true)} title="Review workspace changes">
+          <span aria-hidden="true">⌘</span> Changes
+        </button>
       </div>
+      {showDiff && <SessionDiffViewer workspace={session.workspace} sessionId={session.id} onClose={() => setShowDiff(false)} />}
 
       <div className="message-list">
         <div className="timeline-history">{historyNodes}</div>

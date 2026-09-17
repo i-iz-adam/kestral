@@ -1,0 +1,20 @@
+
+/* Interactive skill playground */
+.skill-playground .skills-header { justify-content: space-between; }
+.skill-playground-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 1rem; }
+.skill-playground-library { display: grid; grid-template-columns: minmax(240px, .85fr) minmax(320px, 1.4fr); gap: 1rem; align-items: start; }
+.skill-row-button { width: 100%; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.skill-row-button.selected { border-color: var(--accent); background: var(--surface-raised, var(--surface)); }
+.skill-row-button .skill-actions { margin-left: auto; white-space: nowrap; }
+.skill-row-button .skill-actions span:last-child { color: var(--danger); cursor: pointer; }
+.skill-trigger-list { display: block; color: var(--accent-soft); font-size: 11px; margin-top: 5px; }
+.skill-editor, .skill-playground-pane { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+.skill-editor { display: flex; flex-direction: column; gap: 8px; }
+.skill-editor textarea, .skill-playground-pane textarea { width: 100%; resize: vertical; font-family: inherit; }
+.skill-editor textarea { font-family: monospace; }
+.skill-playground-pane { max-width: 820px; }
+.skill-preview-results { margin-top: 1.5rem; }
+.skill-preview-card { border: 1px solid var(--border); border-left: 2px solid var(--accent); border-radius: 7px; padding: 12px; margin: 8px 0; }
+.skill-preview-card details { margin-top: 8px; }
+.skill-preview-card summary { cursor: pointer; color: var(--accent-soft); font-size: 12px; }
+@media (max-width: 760px) { .skill-playground-library { grid-template-columns: 1fr; } }

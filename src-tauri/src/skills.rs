@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
@@ -29,6 +30,96 @@ pub struct Skill {
     /// from the built-in version" instead of pretending nothing happened.
     #[serde(default)]
     pub overridden: bool,
+}
+/// A skill together with the content that would be loaded for a prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillMatchPreview {
+    pub skill: Skill,
+    pub content: String,
+}
+
+/// A standing directive loaded into every agent turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Directive {
+    pub source: String,
+    pub content: String,
+}
+
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+fn read_directive_file(path: PathBuf, source: &str) -> Option<Directive> {
+    let content = fs::read_to_string(path).ok()?;
+    let content = content.trim();
+    if content.is_empty() {
+        return None;
+    }
+    Some(Directive {
+        source: source.to_string(),
+        content: content.to_string(),
+    })
+}
+
+/// Loads global and workspace instruction files. Missing, unreadable, and blank files are ignored.
+pub fn read_directives(workspace: Option<&str>) -> Vec<Directive> {
+    read_directives_from(home_dir(), workspace)
+}
+
+fn read_directives_from(home: Option<PathBuf>, workspace: Option<&str>) -> Vec<Directive> {
+    let mut directives = Vec::new();
+    if let Some(home) = home {
+        for (path, source) in [
+            (home.join(".kestrelrules"), "Global ~/.kestrelrules"),
+            (
+                home.join(".kestrel").join("instructions.md"),
+                "Global ~/.kestrel/instructions.md",
+            ),
+        ] {
+            if let Some(directive) = read_directive_file(path, source) {
+                directives.push(directive);
+            }
+        }
+    }
+    if let Some(workspace) = workspace.filter(|path| !path.trim().is_empty()) {
+        let root = PathBuf::from(workspace);
+        for (path, source) in [
+            (root.join(".kestrelrules"), "Project .kestrelrules"),
+            (
+                root.join(".kestrel").join("instructions.md"),
+                "Project .kestrel/instructions.md",
+            ),
+        ] {
+            if let Some(directive) = read_directive_file(path, source) {
+                directives.push(directive);
+            }
+        }
+    }
+    directives
+}
+
+/// Formats standing instructions with explicit scope/source headers.
+pub fn format_directives(directives: &[Directive]) -> Option<String> {
+    if directives.is_empty() {
+        return None;
+    }
+    let mut prompt = String::from("# Standing Kestrel directives\n\nFollow these instructions for this session. Global directives apply across projects; project directives are specific to the current workspace and take precedence when they conflict. Treat them as authoritative system-level guidance.\n\n");
+    for directive in directives {
+        prompt.push_str("## ");
+        prompt.push_str(&directive.source);
+        prompt.push_str("\n\n");
+        prompt.push_str(&directive.content);
+        prompt.push_str("\n\n");
+    }
+    prompt.push_str("End of standing Kestrel directives.");
+    Some(prompt)
 }
 
 /// A skill create/update the agent proposed on its own initiative (see
@@ -272,7 +363,9 @@ fn save_state(app_handle: &tauri::AppHandle, state: &SkillState) {
 /// global dir (existing behavior, unchanged), "project" for a workspace's
 /// `.kestrel/skills/`.
 fn scan_skills_dir(dir: &PathBuf, state: &SkillState, default_source: &str, out: &mut Vec<Skill>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -282,16 +375,27 @@ fn scan_skills_dir(dir: &PathBuf, state: &SkillState, default_source: &str, out:
             let skill_md = path.join("SKILL.md");
             if skill_md.is_file() {
                 if let Ok(data) = fs::read_to_string(&skill_md) {
-                    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+                    let dir_name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
                     let fm = parse_frontmatter(&data);
-                    let name = if !fm.name.is_empty() && fm.name != "Untitled skill" { fm.name } else { dir_name.to_string() };
+                    let name = if !fm.name.is_empty() && fm.name != "Untitled skill" {
+                        fm.name
+                    } else {
+                        dir_name.to_string()
+                    };
                     let id = dir_name.to_string();
                     if !out.iter().any(|s| s.id == id) {
                         out.push(Skill {
                             id: id.clone(),
                             name,
                             description: fm.description,
-                            source: if fm.origin.is_empty() { default_source.to_string() } else { fm.origin },
+                            source: if fm.origin.is_empty() {
+                                default_source.to_string()
+                            } else {
+                                fm.origin
+                            },
                             enabled: !state.disabled.contains(&id),
                             triggers: fm.triggers,
                             overridden: false,
@@ -321,13 +425,21 @@ fn scan_skills_dir(dir: &PathBuf, state: &SkillState, default_source: &str, out:
                 let id = file_name.trim_end_matches(".md").to_string();
                 if let Ok(data) = fs::read_to_string(&path) {
                     let fm = parse_frontmatter(&data);
-                    let name = if !fm.name.is_empty() && fm.name != "Untitled skill" { fm.name } else { id.clone() };
+                    let name = if !fm.name.is_empty() && fm.name != "Untitled skill" {
+                        fm.name
+                    } else {
+                        id.clone()
+                    };
                     if !out.iter().any(|s| s.id == id) {
                         out.push(Skill {
                             id: id.clone(),
                             name,
                             description: fm.description,
-                            source: if fm.origin.is_empty() { default_source.to_string() } else { fm.origin },
+                            source: if fm.origin.is_empty() {
+                                default_source.to_string()
+                            } else {
+                                fm.origin
+                            },
                             enabled: !state.disabled.contains(&id),
                             triggers: fm.triggers,
                             overridden: false,
@@ -360,12 +472,21 @@ pub fn list(app_handle: &tauri::AppHandle, workspace: Option<&str>) -> Vec<Skill
             .ok()
             .map(|raw| parse_frontmatter(&raw));
 
-        let name = override_fm.as_ref().filter(|fm| !fm.name.is_empty() && fm.name != "Untitled skill")
-            .map(|fm| fm.name.clone()).unwrap_or_else(|| b.name.clone());
-        let description = override_fm.as_ref().filter(|fm| !fm.description.is_empty())
-            .map(|fm| fm.description.clone()).unwrap_or_else(|| b.description.clone());
-        let triggers = override_fm.as_ref().filter(|fm| !fm.triggers.is_empty())
-            .map(|fm| fm.triggers.clone()).unwrap_or_default();
+        let name = override_fm
+            .as_ref()
+            .filter(|fm| !fm.name.is_empty() && fm.name != "Untitled skill")
+            .map(|fm| fm.name.clone())
+            .unwrap_or_else(|| b.name.clone());
+        let description = override_fm
+            .as_ref()
+            .filter(|fm| !fm.description.is_empty())
+            .map(|fm| fm.description.clone())
+            .unwrap_or_else(|| b.description.clone());
+        let triggers = override_fm
+            .as_ref()
+            .filter(|fm| !fm.triggers.is_empty())
+            .map(|fm| fm.triggers.clone())
+            .unwrap_or_default();
 
         out.push(Skill {
             id: b.id.to_string(),
@@ -389,7 +510,11 @@ pub fn list(app_handle: &tauri::AppHandle, workspace: Option<&str>) -> Vec<Skill
     out
 }
 
-pub fn get_content(app_handle: &tauri::AppHandle, id: &str, workspace: Option<&str>) -> Option<String> {
+pub fn get_content(
+    app_handle: &tauri::AppHandle,
+    id: &str,
+    workspace: Option<&str>,
+) -> Option<String> {
     // An override, if present, wins over everything else — including a
     // compiled-in builtin. This is the mechanism that lets edit_skill
     // "edit" a builtin without a rebuild: the first edit copies the
@@ -464,7 +589,11 @@ pub fn toggle(app_handle: &tauri::AppHandle, id: &str, enabled: bool) {
     save_state(app_handle, &state);
 }
 
-pub fn delete(app_handle: &tauri::AppHandle, id: &str, workspace: Option<&str>) -> Result<(), String> {
+pub fn delete(
+    app_handle: &tauri::AppHandle,
+    id: &str,
+    workspace: Option<&str>,
+) -> Result<(), String> {
     // A builtin itself can't be deleted, but an override on top of one can
     // — that's just "revert to the original", not "remove the skill".
     let override_file = override_path(app_handle, id);
@@ -544,7 +673,10 @@ pub struct FrontMatter {
 pub fn parse_frontmatter(raw: &str) -> FrontMatter {
     let trimmed = raw.trim_start();
     if let Some(rest) = trimmed.strip_prefix("---") {
-        let rest = rest.trim_start_matches('\r').strip_prefix('\n').unwrap_or(rest);
+        let rest = rest
+            .trim_start_matches('\r')
+            .strip_prefix('\n')
+            .unwrap_or(rest);
         if let Some(end) = rest.find("\n---") {
             let fm = &rest[..end];
             let body = rest[end + 4..]
@@ -573,7 +705,13 @@ pub fn parse_frontmatter(raw: &str) -> FrontMatter {
                     origin = unquote(v);
                 }
             }
-            return FrontMatter { name, description, triggers, origin, body };
+            return FrontMatter {
+                name,
+                description,
+                triggers,
+                origin,
+                body,
+            };
         }
     }
     FrontMatter {
@@ -593,7 +731,11 @@ pub async fn install_from_url(app_handle: &tauri::AppHandle, url: &str) -> Resul
     }
     let raw = resp.text().await.map_err(|e| e.to_string())?;
     let fm = parse_frontmatter(&raw);
-    let name = if fm.name.is_empty() { "Untitled skill".to_string() } else { fm.name };
+    let name = if fm.name.is_empty() {
+        "Untitled skill".to_string()
+    } else {
+        fm.name
+    };
 
     let id = format!("installed-{}", uuid::Uuid::new_v4());
     let file = InstalledSkillFile {
@@ -655,7 +797,13 @@ fn unique_id(app_handle: &tauri::AppHandle, preferred: &str, workspace: Option<&
     format!("{}-{}", preferred, &uuid::Uuid::new_v4().to_string()[..8])
 }
 
-fn render_skill_md(name: &str, description: &str, triggers: &[String], origin: &str, body: &str) -> String {
+fn render_skill_md(
+    name: &str,
+    description: &str,
+    triggers: &[String],
+    origin: &str,
+    body: &str,
+) -> String {
     let mut fm = format!("---\nname: {}\ndescription: {}\n", name, description);
     if !triggers.is_empty() {
         fm.push_str(&format!("triggers: {}\n", triggers.join(", ")));
@@ -698,7 +846,9 @@ pub fn write_skill(
         return Err("content cannot be empty".into());
     }
 
-    let is_builtin = id.map(|i| builtin_skills().iter().any(|b| b.id == i)).unwrap_or(false);
+    let is_builtin = id
+        .map(|i| builtin_skills().iter().any(|b| b.id == i))
+        .unwrap_or(false);
 
     if is_builtin {
         let id = id.unwrap();
@@ -715,7 +865,9 @@ pub fn write_skill(
         });
     }
 
-    let already_exists = id.map(|i| list(app_handle, workspace).iter().any(|s| s.id == i)).unwrap_or(false);
+    let already_exists = id
+        .map(|i| list(app_handle, workspace).iter().any(|s| s.id == i))
+        .unwrap_or(false);
     let resolved_id = match id {
         Some(existing) => existing.to_string(),
         None => unique_id(app_handle, &slugify(name), workspace),
@@ -729,14 +881,19 @@ pub fn write_skill(
     // before this existed.
     let project_dir = workspace.and_then(project_skills_dir);
     let existing_lives_in_project = already_exists
-        && project_dir.as_ref().map(|dir| {
-            dir.join(&resolved_id).join("SKILL.md").is_file()
-                || dir.join(format!("{}.json", resolved_id)).is_file()
-                || dir.join(format!("{}.md", resolved_id)).is_file()
-        }).unwrap_or(false);
+        && project_dir
+            .as_ref()
+            .map(|dir| {
+                dir.join(&resolved_id).join("SKILL.md").is_file()
+                    || dir.join(format!("{}.json", resolved_id)).is_file()
+                    || dir.join(format!("{}.md", resolved_id)).is_file()
+            })
+            .unwrap_or(false);
     let is_project = existing_lives_in_project || (!already_exists && project);
     let target_dir = if is_project {
-        project_dir.ok_or_else(|| "no workspace is active — project-scoped skills need an open workspace".to_string())?
+        project_dir.ok_or_else(|| {
+            "no workspace is active — project-scoped skills need an open workspace".to_string()
+        })?
     } else {
         skills_dir(app_handle)
     };
@@ -749,11 +906,20 @@ pub fn write_skill(
     // that already exist in folder form, use the folder format.
     let json_path = target_dir.join(format!("{}.json", resolved_id));
     let existing_origin = if already_exists {
-        list(app_handle, workspace).into_iter().find(|s| s.id == resolved_id).map(|s| s.source)
+        list(app_handle, workspace)
+            .into_iter()
+            .find(|s| s.id == resolved_id)
+            .map(|s| s.source)
     } else {
         None
     };
-    let origin = existing_origin.unwrap_or_else(|| if is_project { "project".to_string() } else { "learned".to_string() });
+    let origin = existing_origin.unwrap_or_else(|| {
+        if is_project {
+            "project".to_string()
+        } else {
+            "learned".to_string()
+        }
+    });
 
     let md_path = target_dir.join(format!("{}.md", resolved_id));
 
@@ -811,7 +977,10 @@ pub fn edit_skill(
 
     for (i, (old, new, replace_all)) in edits.iter().enumerate() {
         if old.is_empty() {
-            return Err(format!("edit {} has an empty old_string — every edit needs something to find", i + 1));
+            return Err(format!(
+                "edit {} has an empty old_string — every edit needs something to find",
+                i + 1
+            ));
         }
         let count = content.matches(old.as_str()).count();
         if count == 0 {
@@ -826,17 +995,37 @@ pub fn edit_skill(
                 i + 1, count, id
             ));
         }
-        content = if *replace_all { content.replace(old.as_str(), new.as_str()) } else { content.replacen(old.as_str(), new.as_str(), 1) };
+        content = if *replace_all {
+            content.replace(old.as_str(), new.as_str())
+        } else {
+            content.replacen(old.as_str(), new.as_str(), 1)
+        };
     }
 
     // Preserve the existing name/description/triggers — an edit_skill call
     // changes the body, not the metadata (use write_skill directly, or a
     // future rename tool, for that).
-    let existing = list(app_handle, workspace).into_iter().find(|s| s.id == id)
+    let existing = list(app_handle, workspace)
+        .into_iter()
+        .find(|s| s.id == id)
         .ok_or_else(|| format!("no skill with id {}", id))?;
 
-    write_skill(app_handle, Some(id), &existing.name, &existing.description, &content, &existing.triggers, workspace, false)?;
-    Ok(format!("applied {} edit{} to skill {}", edits.len(), if edits.len() == 1 { "" } else { "s" }, id))
+    write_skill(
+        app_handle,
+        Some(id),
+        &existing.name,
+        &existing.description,
+        &content,
+        &existing.triggers,
+        workspace,
+        false,
+    )?;
+    Ok(format!(
+        "applied {} edit{} to skill {}",
+        edits.len(),
+        if edits.len() == 1 { "" } else { "s" },
+        id
+    ))
 }
 
 // ---- proposals: the reviewed half of the self-improvement loop ----
@@ -1026,16 +1215,39 @@ pub fn maybe_execute(
         }
         "create_skill" => {
             let name_arg = args.get("name").and_then(|v| v.as_str());
-            let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let description = args
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str());
             let id = args.get("id").and_then(|v| v.as_str());
             let is_project = args.get("scope").and_then(|v| v.as_str()) == Some("project");
-            let triggers: Vec<String> = args.get("triggers").and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+            let triggers: Vec<String> = args
+                .get("triggers")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|t| t.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             Some(match (name_arg, content) {
-                (Some(name), Some(content)) => write_skill(app_handle, id, name, description, content, &triggers, workspace, is_project)
-                    .map(|s| format!("created skill '{}' (id: {}, scope: {})", s.name, s.id, s.source)),
+                (Some(name), Some(content)) => write_skill(
+                    app_handle,
+                    id,
+                    name,
+                    description,
+                    content,
+                    &triggers,
+                    workspace,
+                    is_project,
+                )
+                .map(|s| {
+                    format!(
+                        "created skill '{}' (id: {}, scope: {})",
+                        s.name, s.id, s.source
+                    )
+                }),
                 _ => Err("missing name or content".to_string()),
             })
         }
@@ -1044,13 +1256,24 @@ pub fn maybe_execute(
             let edits = args.get("edits").and_then(|v| v.as_array());
             Some(match (id, edits) {
                 (Some(id), Some(edits)) if !edits.is_empty() => {
-                    let parsed: Vec<(String, String, bool)> = edits.iter().map(|e| {
-                        (
-                            e.get("old_string").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                            e.get("new_string").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                            e.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false),
-                        )
-                    }).collect();
+                    let parsed: Vec<(String, String, bool)> = edits
+                        .iter()
+                        .map(|e| {
+                            (
+                                e.get("old_string")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                e.get("new_string")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                e.get("replace_all")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false),
+                            )
+                        })
+                        .collect();
                     edit_skill(app_handle, id, &parsed, workspace)
                 }
                 (Some(_), _) => Err("edits array is missing or empty".to_string()),
@@ -1059,19 +1282,37 @@ pub fn maybe_execute(
         }
         "propose_skill" => {
             let name_arg = args.get("name").and_then(|v| v.as_str());
-            let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let description = args
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str());
             let rationale = args.get("rationale").and_then(|v| v.as_str());
-            let target_id = args.get("target_id").and_then(|v| v.as_str()).map(String::from);
-            let triggers: Vec<String> = args.get("triggers").and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+            let target_id = args
+                .get("target_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let triggers: Vec<String> = args
+                .get("triggers")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|t| t.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             Some(match (name_arg, content, rationale) {
                 (Some(name), Some(content), Some(rationale)) => {
-                    let previous_content = target_id.as_deref().and_then(|id| get_content(app_handle, id, workspace));
+                    let previous_content = target_id
+                        .as_deref()
+                        .and_then(|id| get_content(app_handle, id, workspace));
                     let proposal = SkillProposal {
                         id: uuid::Uuid::new_v4().to_string(),
-                        kind: if target_id.is_some() { "update".to_string() } else { "create".to_string() },
+                        kind: if target_id.is_some() {
+                            "update".to_string()
+                        } else {
+                            "create".to_string()
+                        },
                         target_id,
                         name: name.to_string(),
                         description: description.to_string(),
@@ -1109,24 +1350,133 @@ fn now_ms() -> u64 {
 /// anything containing a space or a dot is matched as a substring instead.
 fn skill_keywords(id: &str) -> &'static [&'static str] {
     match id {
-        "git-workflow" => &["git", "commit", "commits", "branch", "rebase", "merge", "pull request", "pr"],
-        "debugging" => &["bug", "debug", "debugging", "crash", "crashing", "traceback", "stack trace", "broken", "failing"],
-        "testing" => &["test", "tests", "testing", "pytest", "jest", "unit test", "coverage", "tdd"],
+        "git-workflow" => &[
+            "git",
+            "commit",
+            "commits",
+            "branch",
+            "rebase",
+            "merge",
+            "pull request",
+            "pr",
+        ],
+        "debugging" => &[
+            "bug",
+            "debug",
+            "debugging",
+            "crash",
+            "crashing",
+            "traceback",
+            "stack trace",
+            "broken",
+            "failing",
+        ],
+        "testing" => &[
+            "test",
+            "tests",
+            "testing",
+            "pytest",
+            "jest",
+            "unit test",
+            "coverage",
+            "tdd",
+        ],
         "code-review" => &["review", "code review", "self-review"],
         "refactoring" => &["refactor", "refactoring", "restructure", "restructuring"],
         "lang-python" => &["python", "pip", "django", "flask", "pytest", ".py"],
-        "lang-typescript" => &["typescript", "javascript", "react", "vite", "npm", "node", "tsx", ".ts", ".tsx", ".js", ".jsx"],
+        "lang-typescript" => &[
+            "typescript",
+            "javascript",
+            "react",
+            "vite",
+            "npm",
+            "node",
+            "tsx",
+            ".ts",
+            ".tsx",
+            ".js",
+            ".jsx",
+        ],
         "lang-rust" => &["rust", "cargo", "tokio", ".rs"],
         "lang-go" => &["golang", "goroutine", "go.mod", ".go"],
-        "frontend-design" => &["frontend-design", "frontend design", "ui design", "visual design", "design lead", "aesthetic", "typography", "palette", "layout concept"],
-        "docx" => &["docx", "dotx", "word doc", "word document", ".docx", ".dotx"],
-        "file-reading" => &["file-reading", "file reading", "read file", "uploaded file", "uploaded_files", "extract-text", "/mnt/user-data/uploads/"],
+        "frontend-design" => &[
+            "frontend-design",
+            "frontend design",
+            "ui design",
+            "visual design",
+            "design lead",
+            "aesthetic",
+            "typography",
+            "palette",
+            "layout concept",
+        ],
+        "docx" => &[
+            "docx",
+            "dotx",
+            "word doc",
+            "word document",
+            ".docx",
+            ".dotx",
+        ],
+        "file-reading" => &[
+            "file-reading",
+            "file reading",
+            "read file",
+            "uploaded file",
+            "uploaded_files",
+            "extract-text",
+            "/mnt/user-data/uploads/",
+        ],
         "pdf" => &["pdf", ".pdf", "pypdf", "pdfplumber", "reportlab", "qpdf"],
-        "pdf-reading" => &["pdf-reading", "pdf reading", "read pdf", "scanned pdf", "pdftotext", "pdfinfo", "pdffonts"],
-        "pptx" => &["pptx", "potx", "powerpoint", "presentation", "slide deck", ".pptx", ".potx"],
-        "xlsx" => &["xlsx", "xlsm", "xls", "excel", "spreadsheet", "openpyxl", ".xlsx", ".xlsm"],
-        "agents-md" => &["agents.md", "agent instructions", "agents file", "repo instructions"],
-        "decompile-jar" => &["decompile", "decompiler", "decompiling", "unpack jar", "obfuscated", "obfuscation", "cfr", "vineflower", "fernflower", "bytecode", "jar file", ".jar", "procyon"],
+        "pdf-reading" => &[
+            "pdf-reading",
+            "pdf reading",
+            "read pdf",
+            "scanned pdf",
+            "pdftotext",
+            "pdfinfo",
+            "pdffonts",
+        ],
+        "pptx" => &[
+            "pptx",
+            "potx",
+            "powerpoint",
+            "presentation",
+            "slide deck",
+            ".pptx",
+            ".potx",
+        ],
+        "xlsx" => &[
+            "xlsx",
+            "xlsm",
+            "xls",
+            "excel",
+            "spreadsheet",
+            "openpyxl",
+            ".xlsx",
+            ".xlsm",
+        ],
+        "agents-md" => &[
+            "agents.md",
+            "agent instructions",
+            "agents file",
+            "repo instructions",
+        ],
+        "decompile-jar" => &[
+            "decompile",
+            "decompiler",
+            "decompiling",
+            "unpack jar",
+            "obfuscated",
+            "obfuscation",
+            "cfr",
+            "vineflower",
+            "fernflower",
+            "bytecode",
+            "jar file",
+            ".jar",
+            "procyon",
+        ],
         _ => &[],
     }
 }
@@ -1150,7 +1500,11 @@ fn matches_keyword(lower: &str, tokens: &std::collections::HashSet<&str>, kw: &s
 /// A skill with neither still works fine; it just relies on the model
 /// finding it via list_skills/read_skill instead of automatic loading,
 /// same as before this existed.
-pub fn find_relevant(app_handle: &tauri::AppHandle, text: &str, workspace: Option<&str>) -> Vec<Skill> {
+pub fn find_relevant(
+    app_handle: &tauri::AppHandle,
+    text: &str,
+    workspace: Option<&str>,
+) -> Vec<Skill> {
     let lower = text.to_lowercase();
     let tokens: std::collections::HashSet<&str> = lower
         .split(|c: char| !c.is_alphanumeric())
@@ -1161,8 +1515,27 @@ pub fn find_relevant(app_handle: &tauri::AppHandle, text: &str, workspace: Optio
         .into_iter()
         .filter(|s| {
             s.enabled
-                && (skill_keywords(&s.id).iter().any(|kw| matches_keyword(&lower, &tokens, kw))
-                    || s.triggers.iter().any(|kw| matches_keyword(&lower, &tokens, kw)))
+                && (skill_keywords(&s.id)
+                    .iter()
+                    .any(|kw| matches_keyword(&lower, &tokens, kw))
+                    || s.triggers
+                        .iter()
+                        .any(|kw| matches_keyword(&lower, &tokens, kw)))
+        })
+        .collect()
+}
+
+/// Dry-run the deterministic trigger pass for UI previews.
+pub fn preview_matches(
+    app_handle: &tauri::AppHandle,
+    prompt: &str,
+    workspace: Option<&str>,
+) -> Vec<SkillMatchPreview> {
+    find_relevant(app_handle, prompt, workspace)
+        .into_iter()
+        .filter_map(|skill| {
+            get_content(app_handle, &skill.id, workspace)
+                .map(|content| SkillMatchPreview { skill, content })
         })
         .collect()
 }
@@ -1229,9 +1602,14 @@ pub async fn find_relevant_ai(
     let Ok(Ok(resp)) = res else {
         return vec![];
     };
-    let Some(raw) = resp.content else { return vec![] };
+    let Some(raw) = resp.content else {
+        return vec![];
+    };
     let ids = parse_id_array(&raw);
-    candidates.into_iter().filter(|s| ids.contains(&s.id)).collect()
+    candidates
+        .into_iter()
+        .filter(|s| ids.contains(&s.id))
+        .collect()
 }
 
 /// Tolerant parse of the fast model's "JSON array of ids" response —
@@ -1259,13 +1637,19 @@ pub fn is_mutating(name: &str) -> bool {
 }
 
 /// Returns set of skill IDs that are already loaded in the session context.
-pub fn get_loaded_skill_ids(session: &crate::sessions::Session) -> std::collections::HashSet<String> {
+pub fn get_loaded_skill_ids(
+    session: &crate::sessions::Session,
+) -> std::collections::HashSet<String> {
     let mut loaded = std::collections::HashSet::new();
     for msg in &session.messages {
         if msg.role == "skill-loaded" {
             if let Some(content) = &msg.content {
                 if let Ok(val) = serde_json::from_str::<Value>(content) {
-                    if let Some(id) = val.get("args").and_then(|a| a.get("skill_id")).and_then(|v| v.as_str()) {
+                    if let Some(id) = val
+                        .get("args")
+                        .and_then(|a| a.get("skill_id"))
+                        .and_then(|v| v.as_str())
+                    {
                         loaded.insert(id.to_string());
                     }
                 }
@@ -1325,8 +1709,60 @@ mod tests {
     fn test_parse_frontmatter_triggers_and_origin() {
         let raw = "---\nname: my-skill\ndescription: desc\ntriggers: foo, bar baz, .ext\norigin: learned\n---\nBody";
         let fm = parse_frontmatter(raw);
-        assert_eq!(fm.triggers, vec!["foo".to_string(), "bar baz".to_string(), ".ext".to_string()]);
+        assert_eq!(
+            fm.triggers,
+            vec!["foo".to_string(), "bar baz".to_string(), ".ext".to_string()]
+        );
         assert_eq!(fm.origin, "learned");
+    }
+
+    #[test]
+    fn directives_load_project_files_and_ignore_blank_files() {
+        let root =
+            std::env::temp_dir().join(format!("kestrel-directives-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join(".kestrel")).unwrap();
+        fs::write(root.join(".kestrelrules"), "  use cargo fmt  \n").unwrap();
+        fs::write(root.join(".kestrel").join("instructions.md"), "\n\n").unwrap();
+        let global = root.join("global");
+        fs::create_dir_all(global.join(".kestrel")).unwrap();
+        fs::write(global.join(".kestrelrules"), "prefer small commits").unwrap();
+        fs::write(
+            global.join(".kestrel").join("instructions.md"),
+            "write tests",
+        )
+        .unwrap();
+
+        let directives = read_directives_from(Some(global), root.to_str());
+        assert_eq!(directives.len(), 3);
+        assert_eq!(directives[0].content, "prefer small commits");
+        assert_eq!(directives[1].content, "write tests");
+        assert_eq!(directives[2].content, "use cargo fmt");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directives_format_has_scope_headers_and_content() {
+        let rendered = format_directives(&[
+            Directive {
+                source: "Global ~/.kestrelrules".into(),
+                content: "global rule".into(),
+            },
+            Directive {
+                source: "Project .kestrelrules".into(),
+                content: "project rule".into(),
+            },
+        ])
+        .unwrap();
+        assert!(rendered.starts_with("# Standing Kestrel directives"));
+        assert!(rendered.contains("## Global ~/.kestrelrules"));
+        assert!(rendered.contains("## Project .kestrelrules"));
+        assert!(rendered.contains("project directives are specific"));
+        assert!(rendered.ends_with("End of standing Kestrel directives."));
+    }
+
+    #[test]
+    fn empty_directives_format_as_no_context() {
+        assert_eq!(format_directives(&[]), None);
     }
 
     #[test]

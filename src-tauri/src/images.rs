@@ -374,22 +374,39 @@ async fn execute_generate(
     let session_id = session.id.as_str();
 
     emit_progress(
-        app_handle, session_id, call_id, "resolving",
-        None, Some(prompt.to_string()), None,
+        app_handle,
+        session_id,
+        call_id,
+        "resolving",
+        None,
+        Some(prompt.to_string()),
+        None,
     );
 
     let cfg = config::load_omniroute_config(app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
 
-    let model = omniroute::resolve_image_model(&cfg, args.get("model").and_then(|v| v.as_str())).await;
+    let model =
+        omniroute::resolve_image_model(&cfg, args.get("model").and_then(|v| v.as_str())).await;
 
     emit_progress(
-        app_handle, session_id, call_id, "rendering",
-        Some(model.clone()), Some(prompt.to_string()), None,
+        app_handle,
+        session_id,
+        call_id,
+        "rendering",
+        Some(model.clone()),
+        Some(prompt.to_string()),
+        None,
     );
 
     let (generated, effective_model) = match omniroute::generate_image(
-        &cfg, &model, prompt, Some(size.as_str()), Some(n), quality, style,
+        &cfg,
+        &model,
+        prompt,
+        Some(size.as_str()),
+        Some(n),
+        quality,
+        style,
     )
     .await
     {
@@ -397,27 +414,48 @@ async fn execute_generate(
         Err(e) => {
             if model != "auto" {
                 emit_progress(
-                    app_handle, session_id, call_id, "rendering",
-                    Some("auto".to_string()), Some(prompt.to_string()), None,
+                    app_handle,
+                    session_id,
+                    call_id,
+                    "rendering",
+                    Some("auto".to_string()),
+                    Some(prompt.to_string()),
+                    None,
                 );
                 match omniroute::generate_image(
-                    &cfg, "auto", prompt, Some(size.as_str()), Some(n), quality, style,
+                    &cfg,
+                    "auto",
+                    prompt,
+                    Some(size.as_str()),
+                    Some(n),
+                    quality,
+                    style,
                 )
                 .await
                 {
                     Ok(images) => (images, "auto".to_string()),
                     Err(retry_err) => {
                         emit_progress(
-                            app_handle, session_id, call_id, "error",
-                            Some(model.clone()), None, Some(retry_err.clone()),
+                            app_handle,
+                            session_id,
+                            call_id,
+                            "error",
+                            Some(model.clone()),
+                            None,
+                            Some(retry_err.clone()),
                         );
                         return Err(retry_err);
                     }
                 }
             } else {
                 emit_progress(
-                    app_handle, session_id, call_id, "error",
-                    Some(model.clone()), None, Some(e.clone()),
+                    app_handle,
+                    session_id,
+                    call_id,
+                    "error",
+                    Some(model.clone()),
+                    None,
+                    Some(e.clone()),
                 );
                 return Err(e);
             }
@@ -475,8 +513,15 @@ fn persist_and_report(
     let editing = p.mode == "edit";
 
     emit_progress_full(
-        app_handle, session_id, call_id, "saving", p.mode,
-        Some(p.model.to_string()), None, None, None,
+        app_handle,
+        session_id,
+        call_id,
+        "saving",
+        p.mode,
+        Some(p.model.to_string()),
+        None,
+        None,
+        None,
     );
 
     let dir = artifact_dir(app_handle, session_id)?;
@@ -540,8 +585,15 @@ fn persist_and_report(
     );
 
     emit_progress_full(
-        app_handle, session_id, call_id, "done", p.mode,
-        Some(p.model.to_string()), None, None, None,
+        app_handle,
+        session_id,
+        call_id,
+        "done",
+        p.mode,
+        Some(p.model.to_string()),
+        None,
+        None,
+        None,
     );
 
     // Kept short and path-shaped on purpose: this is the text that lands
@@ -610,7 +662,10 @@ fn parse_selector(raw: Option<&str>) -> Option<SourceSelector> {
         | Some("above") | Some("previous") => Some(SourceSelector::Latest),
         Some("attachment") | Some("attached") | Some("upload") | Some("uploaded")
         | Some("user") | Some("original") => Some(SourceSelector::Attachment),
-        Some("generated") | Some("generation") | Some("last_generated") | Some("mine")
+        Some("generated")
+        | Some("generation")
+        | Some("last_generated")
+        | Some("mine")
         | Some("output") => Some(SourceSelector::Generated),
         // Anything else is treated as a path.
         _ => None,
@@ -648,7 +703,10 @@ fn bytes_from_message_ref(reference: &str) -> Option<Vec<u8>> {
 /// shocked" right after an attachment picks the attachment, while "now
 /// make it night" right after a render picks the render — which is what
 /// each phrasing means in context.
-fn find_source_in_session(session: &Session, selector: SourceSelector) -> Option<(Vec<u8>, String)> {
+fn find_source_in_session(
+    session: &Session,
+    selector: SourceSelector,
+) -> Option<(Vec<u8>, String)> {
     for message in session.messages.iter().rev() {
         let is_user = message.role == "user";
         let is_tool = message.role == "tool";
@@ -729,7 +787,8 @@ fn read_source_path(workspace: &str, raw: &str) -> Result<Vec<u8>, String> {
         }
         Path::new(workspace).join(candidate)
     };
-    fs::read(&resolved).map_err(|e| format!("could not read source image {}: {}", resolved.display(), e))
+    fs::read(&resolved)
+        .map_err(|e| format!("could not read source image {}: {}", resolved.display(), e))
 }
 
 async fn execute_edit(
@@ -776,8 +835,15 @@ async fn execute_edit(
     let source_arg = args.get("source").and_then(|v| v.as_str());
 
     emit_progress_full(
-        app_handle, session_id, call_id, "resolving", "edit",
-        None, Some(prompt.to_string()), None, None,
+        app_handle,
+        session_id,
+        call_id,
+        "resolving",
+        "edit",
+        None,
+        Some(prompt.to_string()),
+        None,
+        None,
     );
 
     // Resolve the source before anything else: an unresolvable source is
@@ -832,7 +898,12 @@ async fn execute_edit(
         }
     };
 
-    let mask = match args.get("mask").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+    let mask = match args
+        .get("mask")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(raw) => {
             let bytes = read_source_path(&session.workspace, raw)?;
             Some(omniroute::SourceImage::new(bytes, "mask"))
@@ -843,25 +914,44 @@ async fn execute_edit(
     let cfg = config::load_omniroute_config(app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
 
-    let model = omniroute::resolve_image_model(&cfg, args.get("model").and_then(|v| v.as_str())).await;
+    let model =
+        omniroute::resolve_image_model(&cfg, args.get("model").and_then(|v| v.as_str())).await;
 
     emit_progress_full(
-        app_handle, session_id, call_id, "rendering", "edit",
-        Some(model.clone()), Some(prompt.to_string()), None,
+        app_handle,
+        session_id,
+        call_id,
+        "rendering",
+        "edit",
+        Some(model.clone()),
+        Some(prompt.to_string()),
+        None,
         Some(source_data_url.clone()),
     );
 
     let sources = [source];
     let edited = match omniroute::edit_image(
-        &cfg, &model, prompt, &sources, mask.as_ref(), size.as_deref(), Some(n),
+        &cfg,
+        &model,
+        prompt,
+        &sources,
+        mask.as_ref(),
+        size.as_deref(),
+        Some(n),
     )
     .await
     {
         Ok(images) => images,
         Err(e) => {
             emit_progress_full(
-                app_handle, session_id, call_id, "error", "edit",
-                Some(model.clone()), None, Some(e.clone()),
+                app_handle,
+                session_id,
+                call_id,
+                "error",
+                "edit",
+                Some(model.clone()),
+                None,
+                Some(e.clone()),
                 Some(source_data_url.clone()),
             );
             // Note the source in the error: the most common cause is a
@@ -935,7 +1025,8 @@ pub fn copy_artifact_to(
 ) -> Result<String, String> {
     let dest = PathBuf::from(destination);
     if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("could not create {}: {}", parent.display(), e))?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("could not create {}: {}", parent.display(), e))?;
     }
 
     if let Some(src) = source.map(str::trim).filter(|s| !s.is_empty()) {
@@ -947,7 +1038,10 @@ pub fn copy_artifact_to(
 
     if let Some(url) = data_url.map(str::trim).filter(|s| !s.is_empty()) {
         use base64::Engine as _;
-        let payload = url.split_once(";base64,").map(|(_, tail)| tail).unwrap_or(url);
+        let payload = url
+            .split_once(";base64,")
+            .map(|(_, tail)| tail)
+            .unwrap_or(url);
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(payload.trim())
             .map_err(|e| format!("could not decode image data: {}", e))?;
@@ -995,8 +1089,14 @@ mod tests {
     fn selector_parsing_falls_through_to_paths() {
         assert_eq!(parse_selector(None), Some(SourceSelector::Latest));
         assert_eq!(parse_selector(Some("  ")), Some(SourceSelector::Latest));
-        assert_eq!(parse_selector(Some("Attached")), Some(SourceSelector::Attachment));
-        assert_eq!(parse_selector(Some("generated")), Some(SourceSelector::Generated));
+        assert_eq!(
+            parse_selector(Some("Attached")),
+            Some(SourceSelector::Attachment)
+        );
+        assert_eq!(
+            parse_selector(Some("generated")),
+            Some(SourceSelector::Generated)
+        );
         // Anything unrecognized is a path, not an error — that's how a
         // file source reaches read_source_path.
         assert_eq!(parse_selector(Some("assets/cat.png")), None);
@@ -1031,16 +1131,25 @@ mod tests {
 
     #[test]
     fn only_workspace_writes_need_approval() {
-        assert!(!is_mutating_with_args("generate_image", &json!({ "prompt": "x" })));
+        assert!(!is_mutating_with_args(
+            "generate_image",
+            &json!({ "prompt": "x" })
+        ));
         assert!(is_mutating_with_args(
             "generate_image",
             &json!({ "prompt": "x", "save_path": "a.png" })
         ));
-        assert!(!is_mutating_with_args("read_file", &json!({ "save_path": "a.png" })));
+        assert!(!is_mutating_with_args(
+            "read_file",
+            &json!({ "save_path": "a.png" })
+        ));
         assert!(is_mutating_with_args(
             "edit_image",
             &json!({ "prompt": "x", "save_path": "a.png" })
         ));
-        assert!(!is_mutating_with_args("edit_image", &json!({ "prompt": "x" })));
+        assert!(!is_mutating_with_args(
+            "edit_image",
+            &json!({ "prompt": "x" })
+        ));
     }
 }

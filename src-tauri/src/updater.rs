@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
-use tauri_plugin_opener::OpenerExt;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
+use tauri::Emitter;
+use tauri_plugin_opener::OpenerExt;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct UpdateCheckResult {
@@ -92,8 +92,16 @@ pub async fn check_app_update(app_handle: tauri::AppHandle) -> Result<UpdateChec
                 let name_lower = name.to_lowercase();
                 let matches_os = match target_os {
                     "windows" => name_lower.ends_with(".exe") || name_lower.ends_with(".msi"),
-                    "macos" => name_lower.ends_with(".dmg") || name_lower.ends_with(".app.tar.gz") || name_lower.ends_with(".pkg"),
-                    "linux" => name_lower.ends_with(".appimage") || name_lower.ends_with(".deb") || name_lower.ends_with(".rpm"),
+                    "macos" => {
+                        name_lower.ends_with(".dmg")
+                            || name_lower.ends_with(".app.tar.gz")
+                            || name_lower.ends_with(".pkg")
+                    }
+                    "linux" => {
+                        name_lower.ends_with(".appimage")
+                            || name_lower.ends_with(".deb")
+                            || name_lower.ends_with(".rpm")
+                    }
                     _ => false,
                 };
                 if matches_os {
@@ -176,7 +184,9 @@ pub async fn download_and_install_update(
                 completed: true,
             },
         );
-        app_handle.opener().open_url(&target_url, None::<&str>)
+        app_handle
+            .opener()
+            .open_url(&target_url, None::<&str>)
             .map_err(|e| format!("Failed to open release URL: {}", e))?;
         return Ok(true);
     }

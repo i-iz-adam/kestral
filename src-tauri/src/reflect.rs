@@ -115,7 +115,10 @@ fn condensed_transcript(session: &Session) -> String {
 
 fn strip_code_fence(raw: &str) -> &str {
     let s = raw.trim();
-    let s = s.strip_prefix("```json").or_else(|| s.strip_prefix("```")).unwrap_or(s);
+    let s = s
+        .strip_prefix("```json")
+        .or_else(|| s.strip_prefix("```"))
+        .unwrap_or(s);
     s.strip_suffix("```").unwrap_or(s).trim()
 }
 
@@ -165,8 +168,16 @@ pub(crate) async fn maybe_reflect(
     );
 
     let messages = vec![
-        ChatMessage { role: "system".into(), content: Some(system), ..Default::default() },
-        ChatMessage { role: "user".into(), content: Some(transcript), ..Default::default() },
+        ChatMessage {
+            role: "system".into(),
+            content: Some(system),
+            ..Default::default()
+        },
+        ChatMessage {
+            role: "user".into(),
+            content: Some(transcript),
+            ..Default::default()
+        },
     ];
 
     let resp = match omniroute::chat_completion(cfg, "auto/fast", &messages, None).await {
@@ -190,7 +201,10 @@ pub(crate) async fn maybe_reflect(
     if parsed.action != "create" && parsed.action != "update" {
         return;
     }
-    if parsed.name.trim().is_empty() || parsed.content.trim().is_empty() || parsed.rationale.trim().is_empty() {
+    if parsed.name.trim().is_empty()
+        || parsed.content.trim().is_empty()
+        || parsed.rationale.trim().is_empty()
+    {
         return;
     }
     if parsed.action == "update" && parsed.target_id.as_deref().unwrap_or("").is_empty() {

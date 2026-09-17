@@ -124,35 +124,55 @@ pub fn create(
     session
 }
 
-pub fn set_sandbox_shell(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+pub fn set_sandbox_shell(
+    app_handle: &tauri::AppHandle,
+    id: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.sandbox_shell = enabled;
     save(app_handle, &session);
     Ok(())
 }
 
-pub fn set_sandbox_network(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+pub fn set_sandbox_network(
+    app_handle: &tauri::AppHandle,
+    id: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.sandbox_network = enabled;
     save(app_handle, &session);
     Ok(())
 }
 
-pub fn set_workspace(app_handle: &tauri::AppHandle, id: &str, workspace: String) -> Result<(), String> {
+pub fn set_workspace(
+    app_handle: &tauri::AppHandle,
+    id: &str,
+    workspace: String,
+) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.workspace = workspace;
     save(app_handle, &session);
     Ok(())
 }
 
-pub fn set_subagents_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+pub fn set_subagents_enabled(
+    app_handle: &tauri::AppHandle,
+    id: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.subagents_enabled = enabled;
     save(app_handle, &session);
     Ok(())
 }
 
-pub fn set_graceful_stop(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+pub fn set_graceful_stop(
+    app_handle: &tauri::AppHandle,
+    id: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.graceful_stop = enabled;
     save(app_handle, &session);
@@ -166,7 +186,11 @@ pub fn set_title(app_handle: &tauri::AppHandle, id: &str, title: String) -> Resu
     Ok(())
 }
 
-pub fn set_planning_enabled(app_handle: &tauri::AppHandle, id: &str, enabled: bool) -> Result<(), String> {
+pub fn set_planning_enabled(
+    app_handle: &tauri::AppHandle,
+    id: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let mut session = load(app_handle, id).ok_or("Session not found")?;
     session.planning_enabled = enabled;
     save(app_handle, &session);
@@ -192,7 +216,11 @@ pub fn save(app_handle: &tauri::AppHandle, session: &Session) {
     session_to_save.updated_at = Some(now_ms());
     let dir = sessions_dir(app_handle);
     let path = dir.join(format!("{}.json", session_to_save.id));
-    let temp_path = dir.join(format!("{}.json.tmp.{}", session_to_save.id, Uuid::new_v4()));
+    let temp_path = dir.join(format!(
+        "{}.json.tmp.{}",
+        session_to_save.id,
+        Uuid::new_v4()
+    ));
     if let Ok(data) = serde_json::to_string_pretty(&session_to_save) {
         if fs::write(&temp_path, &data).is_ok() {
             if fs::rename(&temp_path, &path).is_err() {
@@ -261,8 +289,8 @@ mod tests {
             turns_since_reflection: 0,
             sandbox_shell: false,
             sandbox_network: false,
-        pinned: false,
-        archived: false,
+            pinned: false,
+            archived: false,
         };
         assert_eq!(session.effective_updated_at(), 1000);
 
@@ -308,8 +336,8 @@ mod tests {
                 turns_since_reflection: 0,
                 sandbox_shell: false,
                 sandbox_network: false,
-        pinned: false,
-        archived: false,
+                pinned: false,
+                archived: false,
             },
             Session {
                 id: "newly-created".into(),
@@ -325,8 +353,8 @@ mod tests {
                 turns_since_reflection: 0,
                 sandbox_shell: false,
                 sandbox_network: false,
-        pinned: false,
-        archived: false,
+                pinned: false,
+                archived: false,
             },
             Session {
                 id: "legacy-session".into(),
@@ -342,8 +370,8 @@ mod tests {
                 turns_since_reflection: 0,
                 sandbox_shell: false,
                 sandbox_network: false,
-        pinned: false,
-        archived: false,
+                pinned: false,
+                archived: false,
             },
         ];
 

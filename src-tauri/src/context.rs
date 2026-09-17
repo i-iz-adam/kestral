@@ -41,7 +41,10 @@ const KEEP_RECENT_MESSAGES: usize = 40;
 const SUMMARY_MARKER: &str = "[conversation summary — earlier turns compacted to save context]";
 
 fn is_summary_message(m: &ChatMessage) -> bool {
-    m.role == "system" && m.content.as_deref().is_some_and(|c| c.starts_with(SUMMARY_MARKER))
+    m.role == "system"
+        && m.content
+            .as_deref()
+            .is_some_and(|c| c.starts_with(SUMMARY_MARKER))
 }
 
 /// Finds the first message at or after `from` whose role is "user" — the
@@ -134,7 +137,11 @@ async fn summarize(cfg: &OmniRouteConfig, chunk: &[ChatMessage]) -> Option<Strin
         ),
         ..Default::default()
     };
-    let user = ChatMessage { role: "user".into(), content: Some(transcript), ..Default::default() };
+    let user = ChatMessage {
+        role: "user".into(),
+        content: Some(transcript),
+        ..Default::default()
+    };
     match omniroute::chat_completion(cfg, "auto/fast", &[system, user], None).await {
         Ok(resp) => resp.content.filter(|s| !s.trim().is_empty()),
         Err(_) => None,
@@ -162,7 +169,11 @@ async fn summarize(cfg: &OmniRouteConfig, chunk: &[ChatMessage]) -> Option<Strin
 /// error, where the estimate turned out to be wrong (a different tokenizer,
 /// a smaller configured context window) and something needs to happen
 /// immediately, not just next step.
-pub async fn maybe_compact(cfg: &OmniRouteConfig, messages: &mut Vec<ChatMessage>, force: bool) -> bool {
+pub async fn maybe_compact(
+    cfg: &OmniRouteConfig,
+    messages: &mut Vec<ChatMessage>,
+    force: bool,
+) -> bool {
     if !force && messages_tokens(messages) < COMPACT_TRIGGER_TOKENS {
         return false;
     }

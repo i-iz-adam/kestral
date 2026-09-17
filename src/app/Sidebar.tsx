@@ -16,6 +16,7 @@ interface Props {
   onOpenSettings: () => void;
   onOpenWorkspace: () => void;
   onOpenSkills: () => void;
+  onOpenSkillPlayground: () => void;
   onOpenAbout: () => void;
   onOpenProviders: () => void;
   onSessionCreated: (id: string) => void;
@@ -28,6 +29,7 @@ export default function Sidebar({
   onOpenSettings,
   onOpenWorkspace,
   onOpenSkills,
+  onOpenSkillPlayground,
   onOpenAbout,
   onOpenProviders,
   onSessionCreated,
@@ -438,6 +440,9 @@ export default function Sidebar({
         <IconRailButton label="Skills" onClick={onOpenSkills}>
           <BookIcon />
         </IconRailButton>
+        <IconRailButton label="Skill Playground" onClick={onOpenSkillPlayground}>
+          <SparkleIcon />
+        </IconRailButton>
         <IconRailButton label="Workspace" onClick={onOpenWorkspace}>
           <FolderIcon />
         </IconRailButton>
@@ -601,6 +606,15 @@ function BookIcon() {
     <svg {...ICON_PROPS}>
       <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" />
       <path d="M4 5.5v15A2.5 2.5 0 0 0 6.5 23H20" />
+    </svg>
+  );
+}
+
+function SparkleIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <path d="m12 2 1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5z" />
+      <path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z" />
     </svg>
   );
 }

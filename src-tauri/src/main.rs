@@ -5,11 +5,13 @@ mod config;
 mod connections;
 mod context;
 mod engine;
+mod git;
 mod github;
 mod images;
 mod omniroute;
 mod plan;
 mod prompts;
+mod rag;
 mod reflect;
 mod sessions;
 mod setup;
@@ -76,6 +78,21 @@ fn get_workspace_path(app_handle: tauri::AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
+fn retrieve_workspace_context(
+    app_handle: tauri::AppHandle,
+    workspace: String,
+    query: String,
+    session_id: Option<String>,
+) -> rag::RetrievalResponse {
+    rag::retrieve_workspace_context(
+        &workspace,
+        &query,
+        &sessions::list(&app_handle),
+        session_id.as_deref().unwrap_or_default(),
+    )
+}
+
+#[tauri::command]
 fn list_workspaces(app_handle: tauri::AppHandle) -> Vec<config::Workspace> {
     config::list_workspaces(&app_handle)
 }
@@ -126,7 +143,9 @@ fn get_cached_models(app_handle: tauri::AppHandle) -> Option<config::ModelsCache
 /// once in the background on open and again whenever the person presses
 /// Refresh.
 #[tauri::command]
-async fn fetch_omniroute_models(app_handle: tauri::AppHandle) -> Result<config::ModelsCache, String> {
+async fn fetch_omniroute_models(
+    app_handle: tauri::AppHandle,
+) -> Result<config::ModelsCache, String> {
     let cfg = config::load_omniroute_config(&app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
     let models = omniroute::list_models(&cfg).await?;
@@ -145,7 +164,10 @@ struct ModelTestResult {
 /// model id actually complete a request" — since an alias or typo'd id
 /// can pass connection tests yet fail every real turn.
 #[tauri::command]
-async fn test_model(app_handle: tauri::AppHandle, model: String) -> Result<ModelTestResult, String> {
+async fn test_model(
+    app_handle: tauri::AppHandle,
+    model: String,
+) -> Result<ModelTestResult, String> {
     let cfg = config::load_omniroute_config(&app_handle)
         .ok_or("No OmniRoute config saved yet — finish setup first")?;
     let messages = vec![omniroute::ChatMessage {
@@ -157,7 +179,11 @@ async fn test_model(app_handle: tauri::AppHandle, model: String) -> Result<Model
     match omniroute::chat_completion(&cfg, &model, &messages, None).await {
         Ok(resp) => {
             let latency_ms = started.elapsed().as_millis() as u64;
-            let has_content = resp.content.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            let has_content = resp
+                .content
+                .as_deref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
             Ok(ModelTestResult {
                 ok: has_content,
                 latency_ms,
@@ -204,6 +230,45 @@ async fn test_omniroute_connection(config: config::OmniRouteConfig) -> Result<bo
     }
 }
 
+#[tauri::command]
+fn get_git_diff(workspace: String, paths: Option<Vec<String>>) -> Result<git::GitDiff, String> {
+    git::diff(&workspace, paths)
+}
+
+#[tauri::command]
+fn get_session_diff(
+    app_handle: tauri::AppHandle,
+    workspace: String,
+    session_id: Option<String>,
+) -> Result<git::GitDiff, String> {
+    let paths = match session_id {
+        Some(id) => {
+            let session = sessions::load(&app_handle, &id).ok_or("Session not found")?;
+            Some(git::session_paths(&session))
+        }
+        None => None,
+    };
+    if matches!(paths.as_ref(), Some(paths) if paths.is_empty()) {
+        return Ok(git::empty_diff());
+    }
+    git::diff(&workspace, paths)
+}
+
+#[tauri::command]
+fn stage_git_files(workspace: String, paths: Vec<String>) -> Result<(), String> {
+    git::stage(&workspace, paths)
+}
+
+#[tauri::command]
+fn unstage_git_files(workspace: String, paths: Vec<String>) -> Result<(), String> {
+    git::unstage(&workspace, paths)
+}
+
+#[tauri::command]
+fn revert_git_files(workspace: String, paths: Vec<String>) -> Result<(), String> {
+    git::revert(&workspace, paths)
+}
+
 // ---- sessions + agent loop ----
 
 #[tauri::command]
@@ -225,7 +290,11 @@ fn create_session(
     // chain here only matters for a stale frontend build or a very first
     // session created before any workspace has explicitly been chosen.
     let workspace = workspace
-        .or_else(|| config::list_workspaces(&app_handle).first().map(|w| w.path.clone()))
+        .or_else(|| {
+            config::list_workspaces(&app_handle)
+                .first()
+                .map(|w| w.path.clone())
+        })
         .or_else(|| config::load_workspace_path(&app_handle))
         .ok_or("No workspace configured yet")?;
     Ok(sessions::create(
@@ -422,7 +491,9 @@ fn delete_connection(app_handle: tauri::AppHandle, id: String) -> Result<(), Str
 }
 
 #[tauri::command]
-async fn test_connection(connection: connections::Connection) -> Result<connections::Connection, String> {
+async fn test_connection(
+    connection: connections::Connection,
+) -> Result<connections::Connection, String> {
     Ok(connections::test_connection(connection).await)
 }
 
@@ -476,8 +547,23 @@ fn list_skills(app_handle: tauri::AppHandle, workspace: Option<String>) -> Vec<s
 }
 
 #[tauri::command]
-fn get_skill_content(app_handle: tauri::AppHandle, id: String, workspace: Option<String>) -> Option<String> {
+fn get_skill_content(
+    app_handle: tauri::AppHandle,
+    id: String,
+    workspace: Option<String>,
+) -> Option<String> {
     skills::get_content(&app_handle, &id, workspace.as_deref())
+}
+
+/// Dry-run the deterministic skill trigger pass without modifying a skill or
+/// invoking a model. Used by the Interactive Skill Playground.
+#[tauri::command]
+fn preview_skill_matches(
+    app_handle: tauri::AppHandle,
+    prompt: String,
+    workspace: Option<String>,
+) -> Vec<skills::SkillMatchPreview> {
+    skills::preview_matches(&app_handle, &prompt, workspace.as_deref())
 }
 
 #[tauri::command]
@@ -486,7 +572,11 @@ fn toggle_skill(app_handle: tauri::AppHandle, id: String, enabled: bool) {
 }
 
 #[tauri::command]
-fn delete_skill(app_handle: tauri::AppHandle, id: String, workspace: Option<String>) -> Result<(), String> {
+fn delete_skill(
+    app_handle: tauri::AppHandle,
+    id: String,
+    workspace: Option<String>,
+) -> Result<(), String> {
     skills::delete(&app_handle, &id, workspace.as_deref())
 }
 
@@ -562,7 +652,10 @@ fn list_skill_proposals(app_handle: tauri::AppHandle) -> Vec<skills::SkillPropos
 }
 
 #[tauri::command]
-fn accept_skill_proposal(app_handle: tauri::AppHandle, id: String) -> Result<skills::Skill, String> {
+fn accept_skill_proposal(
+    app_handle: tauri::AppHandle,
+    id: String,
+) -> Result<skills::Skill, String> {
     skills::accept_proposal(&app_handle, &id)
 }
 
@@ -718,6 +811,7 @@ fn main() {
             get_omniroute_config,
             save_workspace_path,
             get_workspace_path,
+            retrieve_workspace_context,
             list_workspaces,
             add_workspace,
             remove_workspace,
@@ -730,6 +824,11 @@ fn main() {
             create_session,
             list_sessions,
             get_session,
+            get_git_diff,
+            get_session_diff,
+            stage_git_files,
+            unstage_git_files,
+            revert_git_files,
             delete_session,
             set_session_workspace,
             set_session_title,
@@ -754,6 +853,7 @@ fn main() {
             github_action,
             list_skills,
             get_skill_content,
+            preview_skill_matches,
             get_agents_md,
             toggle_skill,
             delete_skill,

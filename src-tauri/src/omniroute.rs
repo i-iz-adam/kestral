@@ -182,10 +182,12 @@ pub async fn fetch_endpoint(
         req
     };
 
-    let mut resp = build_request(true)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to connect to OmniRoute endpoint {}: {}", clean_endpoint, e))?;
+    let mut resp = build_request(true).send().await.map_err(|e| {
+        format!(
+            "Failed to connect to OmniRoute endpoint {}: {}",
+            clean_endpoint, e
+        )
+    })?;
 
     // If 401 Unauthorized or 403 Forbidden, retry without Auth header
     // (management / public endpoints may reject inference Bearer keys)
@@ -223,7 +225,12 @@ fn accumulate_tool_call_delta(tool_acc: &mut ToolAcc, calls: &[Value]) {
     for call in calls {
         let index = call.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
         while tool_acc.len() <= index {
-            tool_acc.push((String::new(), "function".into(), String::new(), String::new()));
+            tool_acc.push((
+                String::new(),
+                "function".into(),
+                String::new(),
+                String::new(),
+            ));
         }
         let entry = &mut tool_acc[index];
         if let Some(id) = call.get("id").and_then(|v| v.as_str()) {
@@ -277,14 +284,20 @@ pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
                         for m in models {
                             let id = m.get("id").and_then(|s| s.as_str()).unwrap_or_default();
                             if id == model {
-                                if let Some(caps) = m.get("capabilities").or_else(|| m.get("supports")) {
-                                    if let Some(v) = caps.get("vision").or_else(|| caps.get("multimodal")) {
+                                if let Some(caps) =
+                                    m.get("capabilities").or_else(|| m.get("supports"))
+                                {
+                                    if let Some(v) =
+                                        caps.get("vision").or_else(|| caps.get("multimodal"))
+                                    {
                                         if let Some(b) = v.as_bool() {
                                             return b;
                                         }
                                     }
                                 }
-                                if let Some(multimodal) = m.get("multimodal").and_then(|v| v.as_bool()) {
+                                if let Some(multimodal) =
+                                    m.get("multimodal").and_then(|v| v.as_bool())
+                                {
                                     return multimodal;
                                 }
                             }
@@ -350,12 +363,21 @@ pub async fn list_models(cfg: &OmniRouteConfig) -> Result<Vec<crate::config::Mod
                 .or_else(|| obj.get("provider"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
-                .or_else(|| id.split('/').next().map(|s| s.to_string()).filter(|_| id.contains('/')));
+                .or_else(|| {
+                    id.split('/')
+                        .next()
+                        .map(|s| s.to_string())
+                        .filter(|_| id.contains('/'))
+                });
             let context_length = obj
                 .get("context_length")
                 .or_else(|| obj.get("context_window"))
                 .and_then(|v| v.as_u64());
-            Some(crate::config::ModelInfo { id, owned_by, context_length })
+            Some(crate::config::ModelInfo {
+                id,
+                owned_by,
+                context_length,
+            })
         })
         .collect();
 
@@ -379,7 +401,11 @@ fn finish_tool_acc(tool_acc: ToolAcc) -> Option<Vec<ToolCall>> {
             .enumerate()
             .filter(|(_, (_, _, name, _))| !name.is_empty())
             .map(|(i, (id, call_type, name, arguments))| ToolCall {
-                id: if id.is_empty() { format!("call_{}", i) } else { id },
+                id: if id.is_empty() {
+                    format!("call_{}", i)
+                } else {
+                    id
+                },
                 call_type,
                 function: ToolCallFunction { name, arguments },
             })
@@ -430,7 +456,11 @@ fn parse_sse_response(text: &str) -> Result<ChatMessage, String> {
 
     Ok(ChatMessage {
         role: "assistant".into(),
-        content: if content.is_empty() { None } else { Some(content) },
+        content: if content.is_empty() {
+            None
+        } else {
+            Some(content)
+        },
         tool_calls: finish_tool_acc(tool_acc),
         ..Default::default()
     })
@@ -499,7 +529,8 @@ pub async fn chat_completion(
         let text = resp.text().await.map_err(|e| e.to_string())?;
         if text.trim().is_empty() {
             return Err(
-                "OmniRoute returned success with an empty response body (expected JSON)".to_string(),
+                "OmniRoute returned success with an empty response body (expected JSON)"
+                    .to_string(),
             );
         }
         // OmniRoute may return SSE (`data: {...}` chunks) even when
@@ -510,7 +541,10 @@ pub async fn chat_completion(
         }
         let json: Value = serde_json::from_str(&text).map_err(|e| {
             let preview: String = text.chars().take(500).collect();
-            format!("error decoding response body: {} (preview: {:?})", e, preview)
+            format!(
+                "error decoding response body: {} (preview: {:?})",
+                e, preview
+            )
         })?;
         let choice = json
             .get("choices")
@@ -672,7 +706,11 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
         }
         return Ok(ChatMessage {
             role: "assistant".into(),
-            content: if content.is_empty() { None } else { Some(content) },
+            content: if content.is_empty() {
+                None
+            } else {
+                Some(content)
+            },
             tool_calls,
             ..Default::default()
         });
@@ -699,7 +737,10 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     }
     let json: Value = serde_json::from_str(&raw_buf).map_err(|e| {
         let preview: String = raw_buf.chars().take(500).collect();
-        format!("error decoding response body: {} (preview: {:?})", e, preview)
+        format!(
+            "error decoding response body: {} (preview: {:?})",
+            e, preview
+        )
     })?;
     let choice = json
         .get("choices")
@@ -960,7 +1001,10 @@ pub async fn generate_image(
 async fn parse_image_response(text: &str, model: &str) -> Result<Vec<GeneratedImage>, String> {
     let json: Value = serde_json::from_str(text).map_err(|e| {
         let preview: String = text.chars().take(300).collect();
-        format!("could not decode image response: {} (preview: {:?})", e, preview)
+        format!(
+            "could not decode image response: {} (preview: {:?})",
+            e, preview
+        )
     })?;
 
     let entries = json
@@ -995,7 +1039,9 @@ async fn parse_image_response(text: &str, model: &str) -> Result<Vec<GeneratedIm
             .and_then(|v| v.as_str())
             .or_else(|| entry.as_str().filter(|s| s.starts_with("http")));
 
-        let bytes = if let Some(b64) = inline.or_else(|| entry.as_str().filter(|s| !s.starts_with("http"))) {
+        let bytes = if let Some(b64) =
+            inline.or_else(|| entry.as_str().filter(|s| !s.starts_with("http")))
+        {
             decode_b64_image(b64)?
         } else if let Some(link) = link {
             fetch_image_url(link).await?
@@ -1007,7 +1053,11 @@ async fn parse_image_response(text: &str, model: &str) -> Result<Vec<GeneratedIm
             continue;
         }
         let mime = sniff_image_mime(&bytes).to_string();
-        out.push(GeneratedImage { bytes, mime, revised_prompt });
+        out.push(GeneratedImage {
+            bytes,
+            mime,
+            revised_prompt,
+        });
     }
 
     if out.is_empty() {
@@ -1035,7 +1085,11 @@ impl SourceImage {
     pub fn new(bytes: Vec<u8>, stem: &str) -> Self {
         let mime = sniff_image_mime(&bytes).to_string();
         let filename = format!("{}.{}", stem, mime_extension(&mime));
-        SourceImage { bytes, mime, filename }
+        SourceImage {
+            bytes,
+            mime,
+            filename,
+        }
     }
 }
 
@@ -1176,7 +1230,12 @@ pub async fn web_search(
 
     let resp = match req.send().await {
         Ok(r) => r,
-        Err(e) => return Ok(format!("Failed to connect to OmniRoute search endpoint: {}", e)),
+        Err(e) => {
+            return Ok(format!(
+                "Failed to connect to OmniRoute search endpoint: {}",
+                e
+            ))
+        }
     };
 
     let status = resp.status();
@@ -1189,12 +1248,19 @@ pub async fn web_search(
         if status.as_u16() == 404 {
             return Ok("Web search failed (HTTP 404): The endpoint /v1/search was not found on your OmniRoute server. Ensure OmniRoute is running and up to date.".to_string());
         }
-        let hint = if text.contains("provider") || text.contains("configured") || status.as_u16() == 400 || status.as_u16() == 500 {
+        let hint = if text.contains("provider")
+            || text.contains("configured")
+            || status.as_u16() == 400
+            || status.as_u16() == 500
+        {
             "\nNote: Please ensure at least one search provider (such as Tavily, Brave, Exa, Serper, etc.) is configured in your OmniRoute providers dashboard."
         } else {
             ""
         };
-        return Ok(format!("Web search error (HTTP {}): {}{}", status, text, hint));
+        return Ok(format!(
+            "Web search error (HTTP {}): {}{}",
+            status, text, hint
+        ));
     }
 
     if text.trim().is_empty() {
@@ -1202,7 +1268,8 @@ pub async fn web_search(
     }
 
     if let Ok(v) = serde_json::from_str::<Value>(&text) {
-        let results = v.get("results")
+        let results = v
+            .get("results")
             .or_else(|| v.get("data"))
             .and_then(|r| r.as_array())
             .or_else(|| v.as_array());
@@ -1214,9 +1281,17 @@ pub async fn web_search(
             let mut formatted = Vec::new();
             for (idx, item) in items.iter().enumerate() {
                 if let Some(obj) = item.as_object() {
-                    let title = obj.get("title").and_then(|t| t.as_str()).unwrap_or("Untitled");
-                    let link = obj.get("url").or_else(|| obj.get("link")).and_then(|u| u.as_str()).unwrap_or("");
-                    let snippet = obj.get("snippet")
+                    let title = obj
+                        .get("title")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("Untitled");
+                    let link = obj
+                        .get("url")
+                        .or_else(|| obj.get("link"))
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("");
+                    let snippet = obj
+                        .get("snippet")
                         .or_else(|| obj.get("content"))
                         .or_else(|| obj.get("description"))
                         .and_then(|s| s.as_str())
@@ -1268,7 +1343,12 @@ pub async fn web_fetch(
 
     let resp = match req.send().await {
         Ok(r) => r,
-        Err(e) => return Ok(format!("Failed to connect to OmniRoute web fetch endpoint: {}", e)),
+        Err(e) => {
+            return Ok(format!(
+                "Failed to connect to OmniRoute web fetch endpoint: {}",
+                e
+            ))
+        }
     };
 
     let status = resp.status();
@@ -1281,12 +1361,19 @@ pub async fn web_fetch(
         if status.as_u16() == 404 {
             return Ok("Web fetch failed (HTTP 404): The endpoint /v1/web/fetch was not found on your OmniRoute server. Ensure OmniRoute is running and up to date.".to_string());
         }
-        let hint = if text.contains("provider") || text.contains("configured") || status.as_u16() == 400 || status.as_u16() == 500 {
+        let hint = if text.contains("provider")
+            || text.contains("configured")
+            || status.as_u16() == 400
+            || status.as_u16() == 500
+        {
             "\nNote: Please ensure at least one web-fetch provider (such as Firecrawl, Jina Reader, Tavily Extract, TinyFish Fetch) is configured in your OmniRoute providers dashboard."
         } else {
             ""
         };
-        return Ok(format!("Web fetch error (HTTP {}): {}{}", status, text, hint));
+        return Ok(format!(
+            "Web fetch error (HTTP {}): {}{}",
+            status, text, hint
+        ));
     }
 
     if text.trim().is_empty() {
@@ -1294,13 +1381,18 @@ pub async fn web_fetch(
     }
 
     if let Ok(v) = serde_json::from_str::<Value>(&text) {
-        let content = v.get("markdown")
+        let content = v
+            .get("markdown")
             .or_else(|| v.get("content"))
             .or_else(|| v.get("text"))
-            .or_else(|| v.get("data").and_then(|d| d.get("markdown").or_else(|| d.get("content"))))
+            .or_else(|| {
+                v.get("data")
+                    .and_then(|d| d.get("markdown").or_else(|| d.get("content")))
+            })
             .and_then(|c| c.as_str());
 
-        let title = v.get("title")
+        let title = v
+            .get("title")
             .or_else(|| v.get("data").and_then(|d| d.get("title")))
             .and_then(|t| t.as_str());
 
@@ -1314,7 +1406,10 @@ pub async fn web_fetch(
         const MAX_LEN: usize = 50_000;
         if result_str.len() > MAX_LEN {
             let truncated: String = result_str.chars().take(MAX_LEN).collect();
-            return Ok(format!("{}\n\n[Content truncated at 50,000 characters]", truncated));
+            return Ok(format!(
+                "{}\n\n[Content truncated at 50,000 characters]",
+                truncated
+            ));
         }
         return Ok(result_str);
     }
@@ -1322,7 +1417,10 @@ pub async fn web_fetch(
     const MAX_LEN: usize = 50_000;
     if text.len() > MAX_LEN {
         let truncated: String = text.chars().take(MAX_LEN).collect();
-        return Ok(format!("{}\n\n[Content truncated at 50,000 characters]", truncated));
+        return Ok(format!(
+            "{}\n\n[Content truncated at 50,000 characters]",
+            truncated
+        ));
     }
     Ok(text)
 }
@@ -1388,19 +1486,20 @@ mod tests {
 
     #[test]
     fn test_format_messages_for_llm_non_vision_fallback() {
-        let msgs = vec![
-            ChatMessage {
-                role: "user".into(),
-                content: Some("Look at this".into()),
-                images: Some(vec!["data:image/png;base64,abc".into()]),
-                ..Default::default()
-            },
-        ];
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: Some("Look at this".into()),
+            images: Some(vec!["data:image/png;base64,abc".into()]),
+            ..Default::default()
+        }];
 
         let formatted = format_messages_for_llm(&msgs, false);
         assert_eq!(formatted.len(), 1);
         assert_eq!(formatted[0]["role"], "user");
-        assert!(formatted[0]["content"].as_str().unwrap().contains("does not support vision"));
+        assert!(formatted[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("does not support vision"));
     }
 
     #[tokio::test]

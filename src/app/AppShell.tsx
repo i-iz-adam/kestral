@@ -3,6 +3,7 @@ import Sidebar from "./Sidebar";
 import SessionView from "./SessionView";
 import Settings, { type SettingsTab } from "./Settings";
 import WorkspacePanel from "./WorkspacePanel";
+import SkillPlayground from "./SkillPlayground";
 import SkillsPanel from "./SkillsPanel";
 import About from "./About";
 import ProvidersPanel from "./ProvidersPanel";
@@ -15,6 +16,7 @@ type View =
   | { kind: "settings"; tab?: SettingsTab }
   | { kind: "workspace" }
   | { kind: "skills" }
+  | { kind: "skill-playground" }
   | { kind: "about" }
   | { kind: "providers" }
   | { kind: "empty" };
@@ -45,6 +47,7 @@ export default function AppShell() {
         onOpenSettings={() => setView({ kind: "settings" })}
         onOpenWorkspace={() => setView({ kind: "workspace" })}
         onOpenSkills={() => setView({ kind: "skills" })}
+        onOpenSkillPlayground={() => setView({ kind: "skill-playground" })}
         onOpenAbout={() => setView({ kind: "about" })}
         onOpenProviders={() => setView({ kind: "providers" })}
         onSessionCreated={(id) => {
@@ -59,6 +62,7 @@ export default function AppShell() {
           {view.kind === "settings" && <Settings initialTab={view.tab} />}
           {view.kind === "workspace" && <WorkspacePanel />}
           {view.kind === "skills" && <SkillsPanel />}
+          {view.kind === "skill-playground" && <SkillPlayground />}
           {view.kind === "about" && <About />}
           {view.kind === "providers" && <ProvidersPanel />}
           {view.kind === "empty" && (
