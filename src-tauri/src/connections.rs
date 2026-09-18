@@ -1007,15 +1007,118 @@ pub async fn execute_connection_action(
                         .map_err(|e| e.to_string())?;
                     handle_discord_response(resp).await
                 }
-                "send_message" => {
-                    let c_id =
-                        channel_id.ok_or("Channel ID is required for sending a Discord message")?;
+                "create_dm" | "open_dm" | "get_dm_channel" => {
+                    let u_id = args
+                        .get("user_id")
+                        .or_else(|| args.get("recipient_id"))
+                        .and_then(|v| v.as_str())
+                        .ok_or("user_id (or recipient_id) is required to open a DM channel")?;
+                    let url = "https://discord.com/api/v10/users/@me/channels";
+                    let resp = client
+                        .post(url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&json!({ "recipient_id": u_id }))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "send_dm" | "dm_user" | "send_direct_message" => {
                     let content = args
                         .get("content")
                         .or_else(|| args.get("message"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    let url = format!("https://discord.com/api/v10/channels/{}/messages", c_id);
+
+                    let target_dm_channel_id = if let Some(u_id) = args
+                        .get("user_id")
+                        .or_else(|| args.get("recipient_id"))
+                        .and_then(|v| v.as_str())
+                    {
+                        let dm_url = "https://discord.com/api/v10/users/@me/channels";
+                        let dm_resp = client
+                            .post(dm_url)
+                            .header("Authorization", format!("Bot {}", token.trim()))
+                            .header("Content-Type", "application/json")
+                            .json(&json!({ "recipient_id": u_id }))
+                            .send()
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let dm_data = handle_discord_response(dm_resp).await?;
+                        let dm_id = dm_data
+                            .get("data")
+                            .and_then(|d| d.get("id"))
+                            .or_else(|| dm_data.get("id"))
+                            .and_then(|v| v.as_str())
+                            .ok_or("Failed to obtain DM channel ID from Discord")?
+                            .to_string();
+                        dm_id
+                    } else if let Some(ref c_id) = channel_id {
+                        c_id.clone()
+                    } else {
+                        return Err("user_id (or recipient_id) or channel_id is required for sending a DM".to_string());
+                    };
+
+                    let url = format!(
+                        "https://discord.com/api/v10/channels/{}/messages",
+                        target_dm_channel_id
+                    );
+                    let resp = client
+                        .post(&url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .header("Content-Type", "application/json")
+                        .json(&json!({ "content": content }))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "list_dms" | "list_dm_channels" => {
+                    let url = "https://discord.com/api/v10/users/@me/channels";
+                    let resp = client
+                        .get(url)
+                        .header("Authorization", format!("Bot {}", token.trim()))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    handle_discord_response(resp).await
+                }
+                "send_message" => {
+                    let target_c_id = if let Some(ref c_id) = channel_id {
+                        c_id.clone()
+                    } else if let Some(u_id) = args
+                        .get("user_id")
+                        .or_else(|| args.get("recipient_id"))
+                        .and_then(|v| v.as_str())
+                    {
+                        let dm_url = "https://discord.com/api/v10/users/@me/channels";
+                        let dm_resp = client
+                            .post(dm_url)
+                            .header("Authorization", format!("Bot {}", token.trim()))
+                            .header("Content-Type", "application/json")
+                            .json(&json!({ "recipient_id": u_id }))
+                            .send()
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        let dm_data = handle_discord_response(dm_resp).await?;
+                        dm_data
+                            .get("data")
+                            .and_then(|d| d.get("id"))
+                            .or_else(|| dm_data.get("id"))
+                            .and_then(|v| v.as_str())
+                            .ok_or("Failed to obtain DM channel ID from Discord")?
+                            .to_string()
+                    } else {
+                        return Err("Channel ID or user_id is required for sending a Discord message".to_string());
+                    };
+
+                    let content = args
+                        .get("content")
+                        .or_else(|| args.get("message"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let url = format!("https://discord.com/api/v10/channels/{}/messages", target_c_id);
                     let resp = client
                         .post(&url)
                         .header("Authorization", format!("Bot {}", token.trim()))
@@ -1431,7 +1534,7 @@ pub fn tool_definitions() -> Value {
                         },
                         "action": {
                             "type": "string",
-                            "description": "Action to perform (e.g., 'send_message', 'list_channels', 'create_channel', 'create_category', 'delete_channel', 'edit_channel', 'get_channel', 'reorder_channels', 'list_roles', 'get_role', 'create_role', 'edit_role', 'delete_role', 'reorder_roles', 'set_channel_permissions', 'delete_channel_permissions', 'assign_role', 'remove_member_role', 'list_members', 'get_member', 'kick_member', 'ban_member', 'unban_member', 'list_bans', 'get_guild', 'edit_guild', 'create_thread', 'list_threads', 'list_emojis', 'create_emoji', 'delete_emoji')"
+                            "description": "Action to perform (e.g., 'send_message', 'send_dm', 'create_dm', 'list_dms', 'list_channels', 'create_channel', 'create_category', 'delete_channel', 'edit_channel', 'get_channel', 'reorder_channels', 'list_roles', 'get_role', 'create_role', 'edit_role', 'delete_role', 'reorder_roles', 'set_channel_permissions', 'delete_channel_permissions', 'assign_role', 'remove_member_role', 'list_members', 'get_member', 'kick_member', 'ban_member', 'unban_member', 'list_bans', 'get_guild', 'edit_guild', 'create_thread', 'list_threads', 'list_emojis', 'create_emoji', 'delete_emoji')"
                         },
                         "args": {
                             "type": "object",

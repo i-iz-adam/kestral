@@ -243,6 +243,17 @@ pub fn tool_definitions() -> Value {
                     "required": ["url"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_app_version",
+                "description": "Get the current version of Kestrel being run.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
         }
     ])
 }
@@ -610,6 +621,10 @@ fn apply_file_hunks(workspace: &str, fh: &FileHunks) -> Result<String, String> {
 
 pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, String> {
     match name {
+        "get_app_version" | "get_version" | "get_kestrel_version" => {
+            let version = env!("CARGO_PKG_VERSION");
+            Ok(format!("Kestrel v{}", version))
+        }
         "read_file" => {
             let path = args
                 .get("path")
@@ -1276,5 +1291,18 @@ fn run_python_execution(working_dir: &Path, code: &str) -> Result<String, String
             }
             Err(e) => return Err(format!("error waiting for python process: {}", e)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_get_app_version() {
+        let res = execute(".", "get_app_version", &json!({})).unwrap();
+        assert!(res.contains("Kestrel v"));
+        assert!(res.contains(env!("CARGO_PKG_VERSION")));
     }
 }

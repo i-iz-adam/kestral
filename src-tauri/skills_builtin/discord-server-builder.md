@@ -72,4 +72,5 @@ When invoking `integration_action`:
 - Permissions: `set_channel_permissions`, `delete_channel_permissions`
 - Guild / Server: `get_guild`, `edit_guild`
 - Emojis: `list_emojis`, `create_emoji`, `delete_emoji`
-- Messaging & Threads: `send_message`, `edit_message`, `delete_message`, `get_messages`, `create_thread`, `list_threads`
+- Direct Messages: `send_dm` (opens DM with `user_id` and sends message), `create_dm` (opens/retrieves DM channel for `user_id`), `list_dms` (lists active bot DM channels)
+- Messaging & Threads: `send_message` (supports `channel_id` or `user_id`), `edit_message`, `delete_message`, `get_messages`, `create_thread`, `list_threads`
