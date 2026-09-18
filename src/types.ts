@@ -48,6 +48,13 @@ export interface ChatMessage {
   name?: string | null;
 }
 
+export interface SessionUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost: number;
+}
+
 export interface Session {
   id: string;
   title: string;
@@ -61,6 +68,7 @@ export interface Session {
   updated_at?: number;
   pinned?: boolean;
   archived?: boolean;
+  usage?: SessionUsage;
 }
 
 export interface Workspace {

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   PlanItem,
   Session,
+  SessionUsage,
   ToolCallEventPayload,
   MessageEventPayload,
   MessageStartEventPayload,
@@ -447,6 +448,12 @@ export function ensureAgentEventsStarted() {
   listen<{ session_id: string; title: string }>("agent://session-title-updated", (evt) => {
     const { session_id, title } = evt.payload;
     mutateSessionLocally(session_id, (s) => ({ ...s, title }));
+    notifyAny();
+  });
+
+  listen<{ session_id: string; usage: SessionUsage }>("agent://usage-updated", (evt) => {
+    const { session_id, usage } = evt.payload;
+    mutateSessionLocally(session_id, (s) => ({ ...s, usage }));
     notifyAny();
   });
 
