@@ -28,6 +28,7 @@ export default function SubagentCard({ event, calls, onOpen }: Props) {
 
   return (
     <div
+      id={`subagent-card-${event.call_id}`}
       className={`subagent-card-animated ${stateClass}`}
       onClick={onOpen}
       role="button"

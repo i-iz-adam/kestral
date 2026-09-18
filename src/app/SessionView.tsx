@@ -36,11 +36,13 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const [showDiff, setShowDiff] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const lastSubagentIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     ensureAgentEventsStarted();
     loadSession(sessionId);
     setActiveSubagentId(null);
+    lastSubagentIdRef.current = null;
   }, [sessionId]);
 
   const slashMatches = input.startsWith("/") ? filterSlashCommands(input) : [];
@@ -66,10 +68,12 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 
   // Scroll instantly to bottom on session switch or when history loads
   useEffect(() => {
-    if (session) {
+    if (session && !lastSubagentIdRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "auto" });
       const timer = setTimeout(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "auto" });
+        if (!lastSubagentIdRef.current) {
+          bottomRef.current?.scrollIntoView({ behavior: "auto" });
+        }
       }, 50);
       return () => clearTimeout(timer);
     }
@@ -77,10 +81,34 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 
   // Smooth scroll during live streaming updates
   useEffect(() => {
-    if (timeline.length > 0) {
+    if (timeline.length > 0 && !lastSubagentIdRef.current && !activeSubagentId) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [timeline]);
+
+  // Scroll back to subagent card when returning from subagent view
+  useEffect(() => {
+    if (!activeSubagentId && lastSubagentIdRef.current) {
+      const targetId = lastSubagentIdRef.current;
+      lastSubagentIdRef.current = null;
+
+      const scrollToCard = () => {
+        const el = document.getElementById(`subagent-card-${targetId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.focus({ preventScroll: true });
+        }
+      };
+
+      scrollToCard();
+      const timer1 = setTimeout(scrollToCard, 50);
+      const timer2 = setTimeout(scrollToCard, 150);
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
+    }
+  }, [activeSubagentId]);
 
   const pushSystemNote = (text: string) => storePushSystemNote(sessionId, text);
 
@@ -237,7 +265,10 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           key={call.call_id}
           event={call}
           calls={calls}
-          onOpen={() => setActiveSubagentId(call.call_id)}
+          onOpen={() => {
+            lastSubagentIdRef.current = call.call_id;
+            setActiveSubagentId(call.call_id);
+          }}
         />
       );
     }

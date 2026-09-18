@@ -4499,10 +4499,13 @@ button.github-card:hover {
   box-shadow: 0 4px 16px rgba(239, 68, 68, 0.08);
 }
 
-.subagent-card-animated:hover {
+.subagent-card-animated:hover,
+.subagent-card-animated:focus,
+.subagent-card-animated:focus-visible {
   transform: translateY(-2px) scale(1.008);
   border-color: rgba(168, 85, 247, 0.7);
   box-shadow: 0 8px 28px rgba(168, 85, 247, 0.22), inset 0 0 16px rgba(168, 85, 247, 0.08);
+  outline: none;
 }
 
 .subagent-card-glow-bg {
