@@ -262,7 +262,27 @@ fn accumulate_tool_call_delta(tool_acc: &mut ToolAcc, calls: &[Value]) {
     }
 }
 
+static VISION_CAPABILITY_CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+    std::sync::OnceLock::new();
+
+fn get_vision_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
+    VISION_CAPABILITY_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+pub fn messages_contain_images(messages: &[ChatMessage]) -> bool {
+    messages
+        .iter()
+        .any(|m| m.images.as_ref().map_or(false, |imgs| !imgs.is_empty()))
+}
+
 pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
+    if let Ok(cache) = get_vision_cache().lock() {
+        if let Some(&vis) = cache.get(model) {
+            return vis;
+        }
+    }
+
+    let mut detected_vision: Option<bool> = None;
     if let Ok(base) = base_url(cfg) {
         let url = format!("{}/v1/models", base);
         let client = get_http_client();
@@ -291,14 +311,16 @@ pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
                                         caps.get("vision").or_else(|| caps.get("multimodal"))
                                     {
                                         if let Some(b) = v.as_bool() {
-                                            return b;
+                                            detected_vision = Some(b);
+                                            break;
                                         }
                                     }
                                 }
                                 if let Some(multimodal) =
                                     m.get("multimodal").and_then(|v| v.as_bool())
                                 {
-                                    return multimodal;
+                                    detected_vision = Some(multimodal);
+                                    break;
                                 }
                             }
                         }
@@ -308,18 +330,30 @@ pub async fn supports_vision(cfg: &OmniRouteConfig, model: &str) -> bool {
         }
     }
 
-    let lower = model.to_lowercase();
-    if lower == "auto" || lower == "auto/vision" || lower == "auto/multimodal" {
-        return true;
+    let vis = match detected_vision {
+        Some(v) => v,
+        None => {
+            let lower = model.to_lowercase();
+            if lower == "auto" || lower == "auto/vision" || lower == "auto/multimodal" {
+                true
+            } else {
+                lower.contains("vision")
+                    || lower.contains("vl")
+                    || lower.contains("gpt-4o")
+                    || lower.contains("claude-3")
+                    || lower.contains("gemini")
+                    || lower.contains("llava")
+                    || lower.contains("qwen-vl")
+                    || lower.contains("pixtral")
+            }
+        }
+    };
+
+    if let Ok(mut cache) = get_vision_cache().lock() {
+        cache.insert(model.to_string(), vis);
     }
-    lower.contains("vision")
-        || lower.contains("vl")
-        || lower.contains("gpt-4o")
-        || lower.contains("claude-3")
-        || lower.contains("gemini")
-        || lower.contains("llava")
-        || lower.contains("qwen-vl")
-        || lower.contains("pixtral")
+
+    vis
 }
 
 /// Fetches the model catalog for the picker in Settings. Tries the
@@ -350,6 +384,7 @@ pub async fn list_models(cfg: &OmniRouteConfig) -> Result<Vec<crate::config::Mod
                     id: id.to_string(),
                     owned_by: None,
                     context_length: None,
+                    supports_vision: None,
                 });
             }
             let obj = m.as_object()?;
@@ -373,10 +408,24 @@ pub async fn list_models(cfg: &OmniRouteConfig) -> Result<Vec<crate::config::Mod
                 .get("context_length")
                 .or_else(|| obj.get("context_window"))
                 .and_then(|v| v.as_u64());
+            let supports_vision = obj
+                .get("capabilities")
+                .or_else(|| obj.get("supports"))
+                .and_then(|caps| caps.get("vision").or_else(|| caps.get("multimodal")))
+                .and_then(|v| v.as_bool())
+                .or_else(|| obj.get("multimodal").and_then(|v| v.as_bool()));
+
+            if let Some(sv) = supports_vision {
+                if let Ok(mut cache) = get_vision_cache().lock() {
+                    cache.insert(id.clone(), sv);
+                }
+            }
+
             Some(crate::config::ModelInfo {
                 id,
                 owned_by,
                 context_length,
+                supports_vision,
             })
         })
         .collect();
@@ -481,7 +530,11 @@ pub async fn chat_completion(
     let base = base_url(cfg)?;
     let url = format!("{}/v1/chat/completions", base);
 
-    let has_vision = supports_vision(cfg, model).await;
+    let has_vision = if messages_contain_images(messages) {
+        supports_vision(cfg, model).await
+    } else {
+        false
+    };
     let formatted_messages = format_messages_for_llm(messages, has_vision);
 
     let mut body = serde_json::json!({
@@ -578,7 +631,11 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     let base = base_url(cfg)?;
     let url = format!("{}/v1/chat/completions", base);
 
-    let has_vision = supports_vision(cfg, model).await;
+    let has_vision = if messages_contain_images(messages) {
+        supports_vision(cfg, model).await
+    } else {
+        false
+    };
     let formatted_messages = format_messages_for_llm(messages, has_vision);
 
     let mut body = serde_json::json!({
@@ -1514,5 +1571,32 @@ mod tests {
         assert!(!supports_vision(&cfg, "auto/coding").await);
         assert!(!supports_vision(&cfg, "auto/fast").await);
         assert!(!supports_vision(&cfg, "deepseek-coder").await);
+    }
+
+    #[test]
+    fn test_messages_contain_images() {
+        let text_msgs = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: Some("Read file main.rs".into()),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: Some("Here is main.rs content".into()),
+                ..Default::default()
+            },
+        ];
+        assert!(!messages_contain_images(&text_msgs));
+
+        let img_msgs = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: Some("Look at this chart".into()),
+                images: Some(vec!["data:image/png;base64,123".into()]),
+                ..Default::default()
+            },
+        ];
+        assert!(messages_contain_images(&img_msgs));
     }
 }

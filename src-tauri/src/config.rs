@@ -144,6 +144,8 @@ pub struct ModelInfo {
     pub owned_by: Option<String>,
     #[serde(default)]
     pub context_length: Option<u64>,
+    #[serde(default)]
+    pub supports_vision: Option<bool>,
 }
 
 /// The on-disk model list cache plus when it was fetched (unix millis),
