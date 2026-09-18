@@ -217,6 +217,9 @@ pub(crate) async fn run(
                 }
                 Err(e) => return Err(e),
             };
+        if let Some(ref usage) = assistant_msg.usage {
+            agent::record_usage(app_handle, &session.id, usage);
+        }
         messages.push(assistant_msg.clone());
 
         if let Some(ref content) = assistant_msg.content {

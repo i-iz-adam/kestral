@@ -10,6 +10,18 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct SessionUsage {
+    #[serde(default)]
+    pub prompt_tokens: usize,
+    #[serde(default)]
+    pub completion_tokens: usize,
+    #[serde(default)]
+    pub total_tokens: usize,
+    #[serde(default)]
+    pub cost: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
@@ -32,6 +44,8 @@ pub struct Session {
     #[serde(default = "default_true")]
     pub graceful_stop: bool,
     pub messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub usage: SessionUsage,
     pub created_at: u64,
     /// Timestamp (UNIX epoch milliseconds) when this session was last updated.
     /// Defaults to None for older sessions saved before this field existed,
@@ -112,6 +126,7 @@ pub fn create(
         subagents_enabled,
         graceful_stop,
         messages: vec![],
+        usage: SessionUsage::default(),
         created_at: now,
         updated_at: Some(now),
         turns_since_reflection: 0,
@@ -284,6 +299,7 @@ mod tests {
             subagents_enabled: true,
             graceful_stop: true,
             messages: vec![],
+            usage: SessionUsage::default(),
             created_at: 1000,
             updated_at: None,
             turns_since_reflection: 0,
@@ -331,6 +347,7 @@ mod tests {
                 subagents_enabled: true,
                 graceful_stop: true,
                 messages: vec![],
+                usage: SessionUsage::default(),
                 created_at: 1000,
                 updated_at: Some(5000),
                 turns_since_reflection: 0,
@@ -348,6 +365,7 @@ mod tests {
                 subagents_enabled: true,
                 graceful_stop: true,
                 messages: vec![],
+                usage: SessionUsage::default(),
                 created_at: 3000,
                 updated_at: Some(3000),
                 turns_since_reflection: 0,
@@ -365,6 +383,7 @@ mod tests {
                 subagents_enabled: true,
                 graceful_stop: true,
                 messages: vec![],
+                usage: SessionUsage::default(),
                 created_at: 2000,
                 updated_at: None,
                 turns_since_reflection: 0,

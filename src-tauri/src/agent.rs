@@ -310,6 +310,43 @@ struct TurnEndEvent<'a> {
 }
 
 #[derive(Clone, Serialize)]
+pub struct UsageUpdatedEvent<'a> {
+    pub session_id: &'a str,
+    pub usage: &'a sessions::SessionUsage,
+}
+
+pub(crate) fn accumulate_usage(
+    app_handle: &tauri::AppHandle,
+    session: &mut Session,
+    usage: &omniroute::Usage,
+) {
+    session.usage.prompt_tokens += usage.prompt_tokens;
+    session.usage.completion_tokens += usage.completion_tokens;
+    session.usage.total_tokens += usage.total_tokens;
+    session.usage.cost += usage
+        .cost
+        .unwrap_or_else(|| omniroute::estimate_cost(usage.prompt_tokens, usage.completion_tokens));
+    sessions::save_async(app_handle, session);
+    let _ = app_handle.emit(
+        "agent://usage-updated",
+        UsageUpdatedEvent {
+            session_id: &session.id,
+            usage: &session.usage,
+        },
+    );
+}
+
+pub(crate) fn record_usage(
+    app_handle: &tauri::AppHandle,
+    session_id: &str,
+    usage: &omniroute::Usage,
+) {
+    if let Some(mut session) = sessions::load(app_handle, session_id) {
+        accumulate_usage(app_handle, &mut session, usage);
+    }
+}
+
+#[derive(Clone, Serialize)]
 struct SessionTitleUpdatedEvent<'a> {
     session_id: &'a str,
     title: &'a str,
@@ -1195,6 +1232,10 @@ async fn run_turn_inner(
         }
 
         let assistant_msg = stream_result?;
+
+        if let Some(ref usage) = assistant_msg.usage {
+            accumulate_usage(app_handle, &mut session, usage);
+        }
 
         let tool_calls = assistant_msg.tool_calls.clone().unwrap_or_default();
         let text = assistant_msg.content.clone().unwrap_or_default();

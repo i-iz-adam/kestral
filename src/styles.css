@@ -1285,6 +1285,129 @@ button:not(:disabled):hover {
   font-size: 16px;
 }
 
+/* ---- session header usage badge & grimoire breakdown popover ---- */
+
+.session-usage-badge-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.session-usage-badge {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.session-usage-badge:hover,
+.session-usage-badge:focus,
+.session-usage-badge-container:hover .session-usage-badge {
+  border-color: var(--gold);
+  color: var(--gold);
+  box-shadow: 0 0 10px var(--gold-dim);
+}
+
+.grimoire-usage-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 1000;
+  width: 290px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, rgba(21, 17, 31, 0.98), rgba(10, 8, 16, 0.99));
+  border: 1px solid rgba(224, 180, 92, 0.45);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.75), 0 0 20px rgba(155, 107, 255, 0.25), inset 0 0 15px rgba(224, 180, 92, 0.05);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px) scale(0.97);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  pointer-events: none;
+}
+
+.session-usage-badge-container:hover .grimoire-usage-popover,
+.session-usage-badge-container:focus-within .grimoire-usage-popover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.grimoire-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.grimoire-popover-sigil {
+  font-size: 14px;
+}
+
+.grimoire-popover-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.grimoire-popover-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(224, 180, 92, 0.4), rgba(155, 107, 255, 0.3), transparent);
+  margin: 8px 0;
+}
+
+.grimoire-popover-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.grimoire-popover-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-dim);
+}
+
+.grimoire-popover-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.grimoire-popover-value {
+  font-family: var(--font-mono, monospace);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.grimoire-popover-row.total-row .grimoire-popover-value {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+
+.grimoire-popover-row.cost-row .grimoire-popover-value {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.grimoire-popover-footer {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono, monospace);
+  opacity: 0.85;
+}
+
 .session-diff-open {
   margin-left: auto;
   border: 1px solid var(--border);

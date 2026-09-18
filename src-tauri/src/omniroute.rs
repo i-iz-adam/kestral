@@ -99,6 +99,15 @@ pub fn format_messages_for_llm(messages: &[ChatMessage], has_vision: bool) -> Ve
         .collect()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Usage {
+    pub prompt_tokens: usize,
+    pub completion_tokens: usize,
+    pub total_tokens: usize,
+    #[serde(default)]
+    pub cost: Option<f64>,
+}
+
 /// OpenAI-compatible chat message. `content` is optional because an
 /// assistant message that only carries tool_calls has no text content.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -113,7 +122,66 @@ pub struct ChatMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+
+/// Estimates tokens using the same inexpensive character-based heuristic
+/// used for context budgeting. This is deliberately model-independent: the
+/// backend may use a tokenizer unavailable to the app.
+pub fn estimate_text_tokens(text: &str) -> usize {
+    (text.chars().count() / 4).max(1)
+}
+
+pub fn estimate_messages_tokens(messages: &[ChatMessage]) -> usize {
+    messages
+        .iter()
+        .map(|message| {
+            let mut tokens = estimate_text_tokens(message.content.as_deref().unwrap_or(""));
+            if let Some(calls) = &message.tool_calls {
+                for call in calls {
+                    tokens += estimate_text_tokens(&call.function.name);
+                    tokens += estimate_text_tokens(&call.function.arguments);
+                }
+            }
+            tokens + 4
+        })
+        .sum()
+}
+
+pub fn estimate_cost(prompt_tokens: usize, completion_tokens: usize) -> f64 {
+    prompt_tokens as f64 * 0.0000015 + completion_tokens as f64 * 0.0000075
+}
+
+fn estimate_completion_tokens(message: &ChatMessage) -> usize {
+    let mut tokens = estimate_text_tokens(message.content.as_deref().unwrap_or(""));
+    if let Some(calls) = &message.tool_calls {
+        for call in calls {
+            tokens += estimate_text_tokens(&call.function.name);
+            tokens += estimate_text_tokens(&call.function.arguments);
+        }
+    }
+    tokens
+}
+
+fn estimated_usage(prompt_tokens: usize, message: &ChatMessage) -> Usage {
+    let completion_tokens = estimate_completion_tokens(message);
+    Usage {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens: prompt_tokens + completion_tokens,
+        cost: Some(estimate_cost(prompt_tokens, completion_tokens)),
+    }
+}
+
+fn usage_from_value(value: Option<&Value>) -> Option<Usage> {
+    value.and_then(|v| serde_json::from_value(v.clone()).ok())
+}
+
+fn attach_usage(mut message: ChatMessage, usage: Option<Usage>, prompt_tokens: usize) -> ChatMessage {
+    message.usage = Some(usage.unwrap_or_else(|| estimated_usage(prompt_tokens, &message)));
+    message
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -465,9 +533,10 @@ fn finish_tool_acc(tool_acc: ToolAcc) -> Option<Vec<ToolCall>> {
 /// Parses an SSE `text/event-stream` body (`data: {...}` lines) into a
 /// single assistant message by concatenating `delta.content` chunks and
 /// reassembling chunked `delta.tool_calls` (arguments arrive fragmented).
-fn parse_sse_response(text: &str) -> Result<ChatMessage, String> {
+fn parse_sse_response(text: &str, prompt_tokens: usize) -> Result<ChatMessage, String> {
     let mut content = String::new();
     let mut tool_acc: ToolAcc = Vec::new();
+    let mut response_usage: Option<Usage> = None;
     let mut saw_chunk = false;
 
     for raw_line in text.lines() {
@@ -485,6 +554,9 @@ fn parse_sse_response(text: &str) -> Result<ChatMessage, String> {
         let v: Value = serde_json::from_str(payload)
             .map_err(|e| format!("error decoding SSE chunk: {} (chunk: {:?})", e, payload))?;
         saw_chunk = true;
+        if let Some(usage) = usage_from_value(v.get("usage")) {
+            response_usage = Some(usage);
+        }
         let delta = v
             .get("choices")
             .and_then(|c| c.get(0))
@@ -503,16 +575,20 @@ fn parse_sse_response(text: &str) -> Result<ChatMessage, String> {
         return Err("OmniRoute returned an SSE body with no data: chunks".to_string());
     }
 
-    Ok(ChatMessage {
-        role: "assistant".into(),
-        content: if content.is_empty() {
-            None
-        } else {
-            Some(content)
+    Ok(attach_usage(
+        ChatMessage {
+            role: "assistant".into(),
+            content: if content.is_empty() {
+                None
+            } else {
+                Some(content)
+            },
+            tool_calls: finish_tool_acc(tool_acc),
+            ..Default::default()
         },
-        tool_calls: finish_tool_acc(tool_acc),
-        ..Default::default()
-    })
+        response_usage,
+        prompt_tokens,
+    ))
 }
 
 /// Sends one chat completion request, non-streaming. Still used by
@@ -590,7 +666,7 @@ pub async fn chat_completion(
         // `stream: false` is sent — handle both shapes.
         let trimmed = text.trim_start();
         if trimmed.starts_with("data:") {
-            return parse_sse_response(&text);
+            return parse_sse_response(&text, estimate_messages_tokens(messages));
         }
         let json: Value = serde_json::from_str(&text).map_err(|e| {
             let preview: String = text.chars().take(500).collect();
@@ -606,7 +682,12 @@ pub async fn chat_completion(
         let message = choice
             .get("message")
             .ok_or("No message in OmniRoute response choice")?;
-        return serde_json::from_value(message.clone()).map_err(|e| e.to_string());
+        let message = serde_json::from_value(message.clone()).map_err(|e| e.to_string())?;
+        return Ok(attach_usage(
+            message,
+            usage_from_value(json.get("usage")),
+            estimate_messages_tokens(messages),
+        ));
     }
 }
 
@@ -682,8 +763,10 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
         }
     };
 
+    let prompt_tokens = estimate_messages_tokens(messages);
     let mut content = String::new();
     let mut tool_acc: ToolAcc = Vec::new();
+    let mut response_usage: Option<Usage> = None;
     let mut saw_chunk = false;
     let mut line_buf = String::new();
     let mut raw_buf = String::new();
@@ -715,6 +798,9 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
                 Err(_) => continue,
             };
             saw_chunk = true;
+            if let Some(usage) = usage_from_value(v.get("usage")) {
+                response_usage = Some(usage);
+            }
             let delta = v
                 .get("choices")
                 .and_then(|c| c.get(0))
@@ -736,7 +822,7 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
     if saw_chunk {
         let tool_calls = finish_tool_acc(tool_acc);
         if content.is_empty() && tool_calls.is_none() {
-            if let Ok(msg) = parse_sse_response(&raw_buf) {
+            if let Ok(msg) = parse_sse_response(&raw_buf, prompt_tokens) {
                 if msg.content.is_some() || msg.tool_calls.is_some() {
                     if let Some(text) = &msg.content {
                         if !text.is_empty() {
@@ -750,6 +836,7 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
                 if let Some(choice) = json.get("choices").and_then(|c| c.get(0)) {
                     if let Some(message) = choice.get("message").or_else(|| choice.get("delta")) {
                         if let Ok(msg) = serde_json::from_value::<ChatMessage>(message.clone()) {
+                            let msg = attach_usage(msg, usage_from_value(json.get("usage")), prompt_tokens);
                             if let Some(text) = &msg.content {
                                 if !text.is_empty() {
                                     on_delta(text);
@@ -761,16 +848,20 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
                 }
             }
         }
-        return Ok(ChatMessage {
-            role: "assistant".into(),
-            content: if content.is_empty() {
-                None
-            } else {
-                Some(content)
+        return Ok(attach_usage(
+            ChatMessage {
+                role: "assistant".into(),
+                content: if content.is_empty() {
+                    None
+                } else {
+                    Some(content)
+                },
+                tool_calls,
+                ..Default::default()
             },
-            tool_calls,
-            ..Default::default()
-        });
+            response_usage,
+            prompt_tokens,
+        ));
     }
 
     // Nothing parsed as an SSE chunk — this backend likely ignored
@@ -784,7 +875,7 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
         );
     }
     if raw_buf.trim_start().starts_with("data:") {
-        let msg = parse_sse_response(&raw_buf)?;
+        let msg = parse_sse_response(&raw_buf, prompt_tokens)?;
         if let Some(text) = &msg.content {
             if !text.is_empty() {
                 on_delta(text);
@@ -807,6 +898,7 @@ pub async fn chat_completion_stream<F: FnMut(&str)>(
         .get("message")
         .ok_or("No message in OmniRoute response choice")?;
     let msg: ChatMessage = serde_json::from_value(message.clone()).map_err(|e| e.to_string())?;
+    let msg = attach_usage(msg, usage_from_value(json.get("usage")), prompt_tokens);
     if let Some(text) = &msg.content {
         if !text.is_empty() {
             on_delta(text);

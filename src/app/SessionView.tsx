@@ -354,6 +354,22 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     }
   }
 
+  const liveMsgCount = timeline.filter(
+    (t) => t.kind === "message" || t.kind === "tool"
+  ).length;
+  const totalMsgs = (session.messages?.length ?? 0) + liveMsgCount;
+
+  const promptTokens = session.usage?.prompt_tokens ?? 0;
+  const completionTokens = session.usage?.completion_tokens ?? 0;
+  const totalTokens = session.usage?.total_tokens ?? (promptTokens + completionTokens);
+  const cost = session.usage?.cost ?? 0;
+
+  const formatTokenCount = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return n.toString();
+  };
+
   return (
     <div className="session-view" style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {plan && plan.length > 0 && <PlanDrawer plan={plan} />}
@@ -364,7 +380,41 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
           title={sending ? "The agent is working" : "Idle"}
         />
         <h2>{session.title}</h2>
-        <span className="session-usage-badge">⚡ {session.messages.length} msgs</span> <span className="hint">{session.mode}</span>
+        <div className="session-usage-badge-container">
+          <span className="session-usage-badge" tabIndex={0} role="button" aria-label="Token usage breakdown">
+            ⚡ {totalMsgs} msgs · 🔮 {formatTokenCount(totalTokens)} tokens (${cost.toFixed(4)})
+          </span>
+          <div className="grimoire-usage-popover">
+            <div className="grimoire-popover-header">
+              <span className="grimoire-popover-sigil">🔮</span>
+              <span className="grimoire-popover-title">Arcane Usage Ledger</span>
+            </div>
+            <div className="grimoire-popover-divider" />
+            <div className="grimoire-popover-grid">
+              <div className="grimoire-popover-row">
+                <span className="grimoire-popover-label">📥 Input (Prompt)</span>
+                <span className="grimoire-popover-value">{promptTokens.toLocaleString()} tokens</span>
+              </div>
+              <div className="grimoire-popover-row">
+                <span className="grimoire-popover-label">📤 Output (Completion)</span>
+                <span className="grimoire-popover-value">{completionTokens.toLocaleString()} tokens</span>
+              </div>
+              <div className="grimoire-popover-row total-row">
+                <span className="grimoire-popover-label">⚡ Total Tokens</span>
+                <span className="grimoire-popover-value">{totalTokens.toLocaleString()} tokens</span>
+              </div>
+              <div className="grimoire-popover-row cost-row">
+                <span className="grimoire-popover-label">💰 Estimated Cost</span>
+                <span className="grimoire-popover-value">${cost.toFixed(4)} USD</span>
+              </div>
+            </div>
+            <div className="grimoire-popover-divider" />
+            <div className="grimoire-popover-footer">
+              <span>📜 Messages: {totalMsgs} ({session.messages?.length ?? 0} persisted{liveMsgCount > 0 ? `, ${liveMsgCount} live` : ""})</span>
+            </div>
+          </div>
+        </div>
+        <span className="hint">{session.mode}</span>
         <button type="button" className="session-diff-open" onClick={() => setShowDiff(true)} title="Review workspace changes">
           <span aria-hidden="true">⌘</span> Changes
         </button>
