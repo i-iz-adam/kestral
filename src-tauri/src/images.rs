@@ -299,7 +299,7 @@ fn resolve_save_path(workspace: &str, rel: &str) -> Result<PathBuf, String> {
         return Err("this session has no workspace, so save_path can't be resolved".to_string());
     }
     let rel_path = Path::new(rel);
-    if rel_path.is_absolute() || rel.contains("..") {
+    if rel_path.is_absolute() || rel_path.has_root() || rel.contains("..") {
         return Err("save_path must be a relative path inside the workspace".to_string());
     }
     Ok(Path::new(workspace).join(rel_path))
@@ -773,7 +773,7 @@ fn artifact_paths_in_result(result: &str) -> Vec<String> {
 /// because the destination is an image endpoint.
 fn read_source_path(workspace: &str, raw: &str) -> Result<Vec<u8>, String> {
     let candidate = Path::new(raw);
-    let resolved = if candidate.is_absolute() {
+    let resolved = if candidate.is_absolute() || candidate.has_root() {
         candidate.to_path_buf()
     } else {
         if raw.contains("..") {

@@ -39,6 +39,7 @@ fn validate_paths(workspace: &Path, paths: &[String]) -> Result<Vec<String>, Str
         .map(|raw| {
             let path = Path::new(raw);
             if path.is_absolute()
+                || path.has_root()
                 || path
                     .components()
                     .any(|component| matches!(component, Component::ParentDir))
