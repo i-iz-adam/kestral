@@ -12,7 +12,6 @@ import {
   testModel as apiTestModel,
 } from "./omnirouteApi";
 import IntegrationsPanel from "./IntegrationsPanel";
-import WorkspacePanel from "./WorkspacePanel";
 import UpdatesSection from "./UpdatesSection";
 
 /// Mirrors `agent::MODEL` in the Rust backend — the model a turn falls
@@ -45,7 +44,6 @@ export type SettingsTab =
   | "omniroute"
   | "defaults"
   | "github"
-  | "workspaces"
   | "sandbox"
   | "updates";
 
@@ -247,7 +245,9 @@ function VirtualImageModelList({
 }
 
 export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(
+    initialTab === ("workspaces" as any) ? "omniroute" : initialTab
+  );
   const [searchQuery, setSearchQuery] = useState("");
 
   const [mode, setMode] = useState<"local" | "remote">("local");
@@ -534,7 +534,6 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
     { id: "omniroute" as const, label: "OmniRoute & Engine", icon: "🔌", keywords: "omniroute connection engine process mode local remote api key command args default model models picker search refresh test active reset image generation" },
     { id: "defaults" as const, label: "Session Defaults", icon: "⚙️", keywords: "session defaults planning mode sub-agents subagents graceful stop" },
     { id: "github" as const, label: "Integrations & Connections", icon: "🌐", keywords: "integrations connections github discord bot the magician token slack telegram notion linear webhook postgres" },
-    { id: "workspaces" as const, label: "Workspaces", icon: "📁", keywords: "workspaces folder directory project active workspace path add folder" },
     { id: "sandbox" as const, label: "Python Sandbox", icon: "🐍", keywords: "python sandbox execution environment run_python binary path" },
     { id: "updates" as const, label: "Updates & System", icon: "🚀", keywords: "updates installer application version check for updates rerun installer" },
   ];
@@ -850,13 +849,6 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
     </div>
   );
 
-  const renderWorkspacesSection = () => (
-    <div className="settings-section-block">
-      <h2>Workspaces</h2>
-      <WorkspacePanel />
-    </div>
-  );
-
   const renderSandboxSection = () => (
     <div className="settings-section-block">
       <h2>Python Sandbox</h2>
@@ -923,7 +915,6 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
         {activeTab === "omniroute" && renderOmniRouteSection()}
         {activeTab === "defaults" && renderDefaultsSection()}
         {activeTab === "github" && renderGithubSection()}
-        {activeTab === "workspaces" && renderWorkspacesSection()}
         {activeTab === "sandbox" && renderSandboxSection()}
         {activeTab === "updates" && renderUpdatesSection()}
       </div>

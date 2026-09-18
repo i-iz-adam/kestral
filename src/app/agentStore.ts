@@ -80,7 +80,6 @@ export function getActiveWorkspace(): string | null {
 
 export function setActiveWorkspace(path: string | null) {
   activeWorkspace = path;
-  setActiveWorkspace(path);
   try {
     if (path) {
       localStorage.setItem(ACTIVE_WORKSPACE_KEY, path);

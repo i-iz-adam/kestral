@@ -6,6 +6,7 @@ import { useAgentSession } from "./useAgentSession";
 import {
   subscribeAny,
   getActiveWorkspace,
+  setActiveWorkspace,
   subscribeActiveWorkspace,
   getRecord,
 } from "./agentStore";
@@ -77,6 +78,12 @@ export default function Sidebar({
     invoke<Workspace[]>("list_workspaces")
       .then((list) => {
         setWorkspaces(list);
+        const currentActive = getActiveWorkspace();
+        if (!currentActive && list.length > 0) {
+          setActiveWorkspace(list[0].path);
+        } else if (currentActive && list.length > 0 && !list.some((w) => w.path === currentActive)) {
+          setActiveWorkspace(list[0].path);
+        }
       })
       .catch(() => {});
   }, []);

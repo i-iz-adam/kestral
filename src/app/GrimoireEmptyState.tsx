@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Session, Workspace } from "../types";
 import AmbientMotes from "./AmbientMotes";
-import { getActiveWorkspace } from "./agentStore";
+import { getActiveWorkspace, subscribeActiveWorkspace } from "./agentStore";
 
 interface Props {
   onSelectSession: (id: string) => void;
@@ -72,7 +72,9 @@ export default function GrimoireEmptyState({
   const [activeSpellTitle, setActiveSpellTitle] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const activeWorkspacePath = getActiveWorkspace();
+  const [activeWorkspacePath, setActiveWorkspacePath] = useState<string | null>(
+    getActiveWorkspace()
+  );
 
   const fetchSessions = useCallback(() => {
     invoke<Session[]>("list_sessions")
@@ -93,6 +95,10 @@ export default function GrimoireEmptyState({
   useEffect(() => {
     fetchSessions();
     fetchWorkspaces();
+    const unsub = subscribeActiveWorkspace(() => {
+      setActiveWorkspacePath(getActiveWorkspace());
+    });
+    return () => unsub();
   }, [fetchSessions, fetchWorkspaces]);
 
   const createNewSession = async (title = "New session") => {
