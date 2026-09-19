@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::agent::{self, LoopDetector, PendingApprovals, SessionStop, StopRequests};
+use crate::agent::{self, LoopDetector, PendingApprovals, PendingQuestions, SessionStop, StopRequests};
 use crate::config;
 use crate::context;
 use crate::github;
@@ -46,6 +46,7 @@ pub fn tool_definitions() -> Value {
 pub(crate) async fn run(
     app_handle: &tauri::AppHandle,
     approvals: &PendingApprovals,
+    questions: &PendingQuestions,
     stops: &StopRequests,
     stop_flag: Arc<SessionStop>,
     session: &Session,
@@ -265,6 +266,7 @@ pub(crate) async fn run(
                     agent::handle_tool_call(
                         app_handle,
                         approvals,
+                        questions,
                         stops,
                         stop_flag,
                         session,

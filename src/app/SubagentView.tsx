@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { ToolCallEventPayload, PlanItem } from "../types";
 import PlanDrawer from "./PlanDrawer";
 import GithubToolCard from "./GithubToolCard";
@@ -7,6 +8,7 @@ import DiffToolCard from "./DiffToolCard";
 import ImageGenCard from "./ImageGenCard";
 import SkillLoadedCard from "./SkillLoadedCard";
 import MessageContent from "./MessageContent";
+import QuestionPromptBox from "./QuestionPromptBox";
 
 interface Props {
   event: ToolCallEventPayload;
@@ -39,6 +41,10 @@ export default function SubagentView({
   })();
 
   const isRunning = event.status === "start" || event.status === "awaiting-approval";
+
+  const activeQuestionCall = subagentCalls.find(
+    (c) => c.name === "ask_question" && c.status === "awaiting-approval"
+  );
 
   return (
     <div className="subagent-view-container" style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -140,13 +146,25 @@ export default function SubagentView({
         <div ref={bottomRef} />
       </div>
 
-      {/* Subagents missing the bottom part used to send a message */}
-      <div className="subagent-view-footer">
-        <div className="subagent-readonly-notice font-mono">
-          <span className="lock-icon">🔒</span>
-          <span>Sub-agents execute tasks autonomously. Direct messaging is disabled.</span>
+      {/* Subagents prompt box or read-only notice */}
+      {activeQuestionCall ? (
+        <div className="subagent-question-container" style={{ padding: "12px 16px", background: "var(--bg-card)", borderTop: "1px solid var(--border)" }}>
+          <QuestionPromptBox
+            callId={activeQuestionCall.call_id}
+            question={(activeQuestionCall.args as { question?: string })?.question || "Sub-agent asks a question:"}
+            options={(activeQuestionCall.args as { options?: string[] })?.options}
+            onAnswer={(answer) => invoke("answer_question", { callId: activeQuestionCall.call_id, answer })}
+            onDismiss={() => invoke("answer_question", { callId: activeQuestionCall.call_id, answer: "[Question dismissed by user]" })}
+          />
         </div>
-      </div>
+      ) : (
+        <div className="subagent-view-footer">
+          <div className="subagent-readonly-notice font-mono">
+            <span className="lock-icon">🔒</span>
+            <span>Sub-agents execute tasks autonomously. Direct messaging is disabled.</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -12,12 +12,16 @@ export default function SubagentCard({ event, calls, onOpen }: Props) {
     return args?.task ?? "subagent task";
   })();
 
+  const hasPendingQuestion = calls.some(
+    (c) => c.name === "ask_question" && c.status === "awaiting-approval"
+  );
+
   const stateClass =
     event.status === "done"
       ? "done"
       : event.status === "error"
       ? "error"
-      : event.status === "awaiting-approval"
+      : hasPendingQuestion || event.status === "awaiting-approval"
       ? "awaiting"
       : "running";
 
@@ -61,6 +65,8 @@ export default function SubagentCard({ event, calls, onOpen }: Props) {
               ? "Completed"
               : event.status === "error"
               ? "Failed"
+              : hasPendingQuestion
+              ? "Question"
               : event.status === "awaiting-approval"
               ? "Awaiting"
               : "Active"}

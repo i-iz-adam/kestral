@@ -23,6 +23,7 @@ import {
 import { useAgentSession } from "./useAgentSession";
 import PlanDrawer from "./PlanDrawer";
 import SessionDiffViewer from "./SessionDiffViewer";
+import QuestionPromptBox from "./QuestionPromptBox";
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
   // Live turn state (timeline/liveCalls/sending) and the persisted session
@@ -220,6 +221,21 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       e.target.value = "";
     }
   };
+
+  const activeQuestionCall = liveCalls.find(
+    (c) => c.name === "ask_question" && c.status === "awaiting-approval"
+  );
+
+  const activeSubagentQuestions = useMemo(() => {
+    return Object.entries(subagentCalls || {}).flatMap(([parentCallId, calls]) => {
+      const qCall = calls.find((c) => c.name === "ask_question" && c.status === "awaiting-approval");
+      if (!qCall) return [];
+      const parentCall = liveCalls.find((c) => c.call_id === parentCallId);
+      const task = (parentCall?.args as { task?: string } | undefined)?.task || "Sub-agent Task";
+      const question = (qCall.args as { question?: string } | undefined)?.question || "Sub-agent asks a question";
+      return [{ parentCallId, questionCall: qCall, task, question }];
+    });
+  }, [subagentCalls, liveCalls]);
 
   const send = async () => {
     if ((!input.trim() && attachedImages.length === 0) || sending) return;
@@ -477,6 +493,39 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
       </div>
 
       <div className="composer-area">
+        {activeSubagentQuestions.map((sq) => (
+          <div
+            key={sq.questionCall.call_id}
+            className="subagent-question-notification-card"
+            onClick={() => {
+              lastSubagentIdRef.current = sq.parentCallId;
+              setActiveSubagentId(sq.parentCallId);
+            }}
+          >
+            <div className="subagent-question-card-header">
+              <span className="subagent-badge-pill font-mono">🤖 Sub-agent Question</span>
+              <span className="subagent-task-title font-mono" title={sq.task}>
+                {sq.task}
+              </span>
+              <button
+                type="button"
+                className="subagent-question-card-dismiss"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  invoke("answer_question", { callId: sq.questionCall.call_id, answer: "[Question dismissed by user]" });
+                }}
+                title="Dismiss question"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="subagent-question-card-body">
+              <span className="subagent-question-card-text">{sq.question}</span>
+              <span className="subagent-question-card-action font-mono">Click to view & answer &rarr;</span>
+            </div>
+          </div>
+        ))}
+
         {attachedImages.length > 0 && (
           <div className="attached-images-preview">
             {attachedImages.map((img, idx) => (
@@ -501,7 +550,16 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
             onSelect={selectSlashCommand}
           />
         )}
-        <div className="composer">
+        {activeQuestionCall ? (
+          <QuestionPromptBox
+            callId={activeQuestionCall.call_id}
+            question={(activeQuestionCall.args as { question?: string })?.question || "The agent has a question:"}
+            options={(activeQuestionCall.args as { options?: string[] })?.options}
+            onAnswer={(answer) => invoke("answer_question", { callId: activeQuestionCall.call_id, answer })}
+            onDismiss={() => invoke("answer_question", { callId: activeQuestionCall.call_id, answer: "[Question dismissed by user]" })}
+          />
+        ) : (
+          <div className="composer">
           <label className="attach-btn" title="Attach image">
             <input
               type="file"
@@ -578,6 +636,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
             )}
           </button>
         </div>
+        )}
       </div>
     </div>
   );

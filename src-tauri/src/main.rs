@@ -417,18 +417,20 @@ fn delete_session(app_handle: tauri::AppHandle, id: String) {
 async fn send_message(
     app_handle: tauri::AppHandle,
     approvals: tauri::State<'_, agent::PendingApprovals>,
+    questions: tauri::State<'_, agent::PendingQuestions>,
     stops: tauri::State<'_, agent::StopRequests>,
     session_id: String,
     message: String,
     images: Option<Vec<String>>,
 ) -> Result<(), String> {
-    agent::run_turn(app_handle, approvals, stops, session_id, message, images).await
+    agent::run_turn(app_handle, approvals, questions, stops, session_id, message, images).await
 }
 
 #[tauri::command]
 async fn stop_session(
     _app_handle: tauri::AppHandle,
     approvals: tauri::State<'_, agent::PendingApprovals>,
+    questions: tauri::State<'_, agent::PendingQuestions>,
     stops: tauri::State<'_, agent::StopRequests>,
     session_id: String,
 ) -> Result<(), String> {
@@ -438,8 +440,18 @@ async fn stop_session(
     // step boundary (and every live sub-agent's own loop) winds down and
     // hands back whatever it already got through.
     agent::approve_all_pending(&approvals, &session_id, false);
+    agent::dismiss_all_questions(&questions, &session_id);
     stops.request(&session_id);
     Ok(())
+}
+
+#[tauri::command]
+fn answer_question(
+    questions: tauri::State<'_, agent::PendingQuestions>,
+    call_id: String,
+    answer: String,
+) {
+    agent::resolve_question(&questions, &call_id, answer);
 }
 
 #[tauri::command]
@@ -792,6 +804,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(agent::PendingApprovals::default())
+        .manage(agent::PendingQuestions::default())
         .manage(agent::StopRequests::default())
         .manage(engine::EngineState::default())
         .setup(|app| {
@@ -842,6 +855,7 @@ fn main() {
             send_message,
             stop_session,
             approve_tool_call,
+            answer_question,
             get_connections,
             save_connection,
             delete_connection,

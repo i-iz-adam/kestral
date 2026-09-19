@@ -57,6 +57,28 @@ pub fn tool_definitions() -> Value {
         {
             "type": "function",
             "function": {
+                "name": "ask_question",
+                "description": "Ask the user a question with predefined choices or request custom input when you need user guidance, choices, decisions, or clarification before proceeding.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question prompt to present to the user."
+                        },
+                        "options": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Optional list of predefined choice options for the user to select."
+                        }
+                    },
+                    "required": ["question"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "read_file",
                 "description": "Read the contents of a text file, relative to the workspace root. Large files are truncated (with a note telling you the total line count) — pass start_line/num_lines to page through the rest instead of re-reading from the top.",
                 "parameters": {

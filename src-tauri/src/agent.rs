@@ -113,6 +113,9 @@ impl LoopDetector {
 #[derive(Default)]
 pub struct PendingApprovals(pub Mutex<HashMap<String, (String, oneshot::Sender<bool>)>>);
 
+#[derive(Default)]
+pub struct PendingQuestions(pub Mutex<HashMap<String, (String, oneshot::Sender<String>)>>);
+
 /// Per-session stop state, shared between the top-level turn loop and any
 /// sub-agent loops that turn spawned (a sub-agent is told to check the
 /// SAME session's flag, not one of its own — stopping the chat stops its
@@ -525,6 +528,7 @@ pub(crate) fn emit_skill_loaded(
 pub(crate) async fn execute_tool(
     app_handle: &tauri::AppHandle,
     approvals: &PendingApprovals,
+    questions: &PendingQuestions,
     stops: &StopRequests,
     stop_flag: Arc<SessionStop>,
     session: &Session,
@@ -540,7 +544,7 @@ pub(crate) async fn execute_tool(
         // Boxed to break the async recursion cycle:
         // execute_tool -> subagent::run -> handle_tool_call -> execute_tool.
         return Box::pin(subagent::run(
-            app_handle, approvals, stops, stop_flag, session, call_id, task,
+            app_handle, approvals, questions, stops, stop_flag, session, call_id, task,
         ))
         .await;
     }
@@ -654,6 +658,7 @@ pub(crate) async fn execute_tool(
 pub(crate) async fn handle_tool_call(
     app_handle: &tauri::AppHandle,
     approvals: &PendingApprovals,
+    questions: &PendingQuestions,
     stops: &StopRequests,
     stop_flag: Arc<SessionStop>,
     session: &Session,
@@ -680,6 +685,52 @@ pub(crate) async fn handle_tool_call(
     // mid-flight should take effect on the very next tool call in that
     // same turn, not only on the next message. Falls back to the
     // in-memory value if the reload fails for some reason.
+    if call.function.name == "ask_question" {
+        let (tx, rx) = oneshot::channel::<String>();
+        questions
+            .0
+            .lock()
+            .unwrap()
+            .insert(call.id.clone(), (session_id.to_string(), tx));
+
+        emit_tool_event(
+            app_handle,
+            session_id,
+            &call.id,
+            &call.function.name,
+            "awaiting-approval",
+            Some(args.clone()),
+            None,
+            parent_call_id,
+        );
+
+        let answer = tokio::select! {
+            ans = rx => ans.unwrap_or_else(|_| "[Question dismissed by user]".to_string()),
+            _ = stop_flag.notify.notified() => {
+                questions.0.lock().unwrap().remove(&call.id);
+                "[Question cancelled by user stop]".to_string()
+            }
+        };
+
+        emit_tool_event(
+            app_handle,
+            session_id,
+            &call.id,
+            &call.function.name,
+            "done",
+            None,
+            Some(answer.clone()),
+            parent_call_id,
+        );
+
+        return ChatMessage {
+            role: "tool".into(),
+            content: Some(answer),
+            tool_call_id: Some(call.id.clone()),
+            name: Some(call.function.name.clone()),
+            ..Default::default()
+        };
+    }
     let planning_enabled = sessions::load(app_handle, session_id)
         .map(|s| s.planning_enabled)
         .unwrap_or(session.planning_enabled);
@@ -734,6 +785,7 @@ pub(crate) async fn handle_tool_call(
     let result = execute_tool(
         app_handle,
         approvals,
+        questions,
         stops,
         stop_flag,
         session,
@@ -776,6 +828,7 @@ pub(crate) async fn handle_tool_call(
 pub async fn run_turn(
     app_handle: tauri::AppHandle,
     approvals: tauri::State<'_, PendingApprovals>,
+    questions: tauri::State<'_, PendingQuestions>,
     stops: tauri::State<'_, StopRequests>,
     session_id: String,
     user_message: String,
@@ -784,6 +837,7 @@ pub async fn run_turn(
     run_turn_with_stop(
         app_handle,
         approvals,
+        questions,
         stops,
         session_id,
         user_message,
@@ -795,6 +849,7 @@ pub async fn run_turn(
 pub async fn run_turn_with_stop(
     app_handle: tauri::AppHandle,
     approvals: tauri::State<'_, PendingApprovals>,
+    questions: tauri::State<'_, PendingQuestions>,
     stops: tauri::State<'_, StopRequests>,
     session_id: String,
     user_message: String,
@@ -805,6 +860,7 @@ pub async fn run_turn_with_stop(
     let result = run_turn_inner(
         &app_handle,
         approvals,
+        questions,
         &stops,
         stop_flag.clone(),
         &session_id,
@@ -899,6 +955,7 @@ async fn stream_assistant_turn(
 async fn run_turn_inner(
     app_handle: &tauri::AppHandle,
     approvals: tauri::State<'_, PendingApprovals>,
+    questions: tauri::State<'_, PendingQuestions>,
     stops: &StopRequests,
     stop_flag: Arc<SessionStop>,
     session_id: &str,
@@ -1311,13 +1368,14 @@ async fn run_turn_inner(
         let tool_futures = tool_calls.iter().map(|call| {
             let app_handle = app_handle;
             let approvals = approvals.inner();
+            let questions = questions.inner();
             let stops = stops;
             let stop_flag = stop_flag.clone();
             let session = &session;
             let session_id = session_id;
             async move {
                 handle_tool_call(
-                    app_handle, approvals, stops, stop_flag, session, session_id, call, None,
+                    app_handle, approvals, questions, stops, stop_flag, session, session_id, call, None,
                 )
                 .await
             }
@@ -1368,6 +1426,27 @@ async fn run_turn_inner(
     }
 }
 /// Resolves a single pending approval by tool-call id.
+pub fn resolve_question(questions: &PendingQuestions, call_id: &str, answer: String) {
+    if let Some((_, tx)) = questions.0.lock().unwrap().remove(call_id) {
+        let _ = tx.send(answer);
+    }
+}
+
+pub fn dismiss_all_questions(questions: &PendingQuestions, session_id: &str) -> usize {
+    let mut map = questions.0.lock().unwrap();
+    let ids: Vec<String> = map
+        .iter()
+        .filter(|(_, (sid, _))| sid == session_id)
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &ids {
+        if let Some((_, tx)) = map.remove(id) {
+            let _ = tx.send("[Question dismissed by user]".to_string());
+        }
+    }
+    ids.len()
+}
+
 pub fn resolve_approval(approvals: &PendingApprovals, call_id: &str, approved: bool) {
     if let Some((_, tx)) = approvals.0.lock().unwrap().remove(call_id) {
         let _ = tx.send(approved);
