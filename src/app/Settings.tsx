@@ -264,6 +264,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
   const [defaultPlanning, setDefaultPlanning] = useState(true);
   const [defaultSubagents, setDefaultSubagents] = useState(true);
   const [defaultGracefulStop, setDefaultGracefulStop] = useState(true);
+  const [defaultShellTimeout, setDefaultShellTimeout] = useState(60);
   const [defaultsSaved, setDefaultsSaved] = useState(false);
 
   const [pythonStatus, setPythonStatus] = useState<PythonStatusPayload | null>(null);
@@ -315,6 +316,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
         setDefaultPlanning(defs.planning_enabled ?? true);
         setDefaultSubagents(defs.subagents_enabled ?? true);
         setDefaultGracefulStop(defs.graceful_stop ?? true);
+        setDefaultShellTimeout(defs.shell_timeout_seconds ?? 60);
       }
     });
     checkPython();
@@ -524,6 +526,7 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
         planning_enabled: defaultPlanning,
         subagents_enabled: defaultSubagents,
         graceful_stop: defaultGracefulStop,
+        shell_timeout_seconds: defaultShellTimeout,
       },
     });
     setDefaultsSaved(true);
@@ -831,6 +834,19 @@ export default function Settings({ initialTab = "omniroute" }: SettingsProps) {
             />
             Graceful stop (sub-agents return an overview when you stop)
           </label>
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <label style={{ fontSize: 13, color: "var(--fg)" }}>
+              Shell command timeout (seconds):
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={1800}
+              value={defaultShellTimeout}
+              onChange={(e) => setDefaultShellTimeout(Math.max(1, parseInt(e.target.value) || 60))}
+              style={{ width: 80, padding: "4px 8px" }}
+            />
+          </div>
         </div>
         <button
           className={`primary ${defaultsSaved ? "saved" : ""}`}

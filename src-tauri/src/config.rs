@@ -7,6 +7,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_shell_timeout_seconds() -> u64 {
+    crate::tools::DEFAULT_SHELL_TIMEOUT_SECS
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDefaults {
     pub planning_enabled: bool,
@@ -23,6 +27,9 @@ pub struct SessionDefaults {
     /// turn did up to that point is saved.
     #[serde(default = "default_true")]
     pub graceful_stop: bool,
+    /// Default timeout for run_shell execution in seconds (default 60s).
+    #[serde(default = "default_shell_timeout_seconds")]
+    pub shell_timeout_seconds: u64,
 }
 
 impl Default for SessionDefaults {
@@ -31,6 +38,7 @@ impl Default for SessionDefaults {
             planning_enabled: true,
             subagents_enabled: true,
             graceful_stop: true,
+            shell_timeout_seconds: 60,
         }
     }
 }

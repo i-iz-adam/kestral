@@ -10,7 +10,7 @@ export default function About() {
   const { result: updateResult } = useUpdaterStore();
   const openLink = (url: string) => open(url);
 
-  const currentVersion = updateResult?.current_version || "1.2.0";
+  const currentVersion = updateResult?.current_version || "1.2.1";
 
   return (
     <div className="settings-view">

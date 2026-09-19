@@ -137,6 +137,12 @@ pub struct StopRequests(Mutex<HashMap<String, Weak<SessionStop>>>);
 const STOP_POLL_SECS: f64 = 0.1;
 
 impl SessionStop {
+    pub(crate) fn new() -> Self {
+        Self {
+            requested: std::sync::atomic::AtomicBool::new(false),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
     /// Whether a stop was requested for this session.
     pub(crate) fn is_requested(&self) -> bool {
         self.requested.load(Ordering::Relaxed)
@@ -558,7 +564,7 @@ pub(crate) async fn execute_tool(
         let timeout_secs = args
             .get("timeout_seconds")
             .and_then(|v| v.as_u64())
-            .unwrap_or(tools::DEFAULT_SHELL_TIMEOUT_SECS);
+            .unwrap_or(config::get_session_defaults_or_default(app_handle).shell_timeout_seconds);
         let workspace = session.workspace.clone();
         return tools::run_shell_async(
             &workspace,

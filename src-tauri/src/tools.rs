@@ -22,7 +22,7 @@ const MAX_TOOL_OUTPUT_CHARS: usize = 40_000;
 /// actually breaks a long session (see run_shell's doc comment below), so
 /// the default is generous but finite, and the model can ask for more, up
 /// to a hard ceiling, for a command it expects to be slow.
-pub(crate) const DEFAULT_SHELL_TIMEOUT_SECS: u64 = 300;
+pub(crate) const DEFAULT_SHELL_TIMEOUT_SECS: u64 = 60;
 const MAX_SHELL_TIMEOUT_SECS: u64 = 1800;
 
 /// Directory names skipped entirely by search_code/find_files — build
@@ -187,12 +187,12 @@ pub fn tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "run_shell",
-                "description": "Run a shell command inside the workspace root and return its stdout/stderr. On macOS/Linux this runs via 'sh -c'; on Windows it runs via PowerShell (not cmd.exe), which does have 'ls', 'cat', 'cp', 'mv', 'rm', 'pwd', and 'echo' as built-in aliases, but not 'grep' or Unix-style 'find' — use search_code/find_files instead of piping through grep/find, and prefer read_file/edit_file/apply_patch over cat/redirection for reading or changing files, since those work identically on every platform. Quote arguments the way the target shell expects (e.g. a git commit message must be one quoted argument to -m — an unquoted multi-word message gets split into extra pathspec arguments and fails). The command is killed if it doesn't finish within the timeout (default 5 minutes) — pass a larger timeout_seconds for something you expect to be slow (a full build, a test suite, a decompile pass), up to 30 minutes; very large stdout/stderr is truncated (head and tail kept) rather than returned in full.",
+                "description": "Run a shell command inside the workspace root and return its stdout/stderr. On macOS/Linux this runs via 'sh -c'; on Windows it runs via PowerShell (not cmd.exe), which does have 'ls', 'cat', 'cp', 'mv', 'rm', 'pwd', and 'echo' as built-in aliases, but not 'grep' or Unix-style 'find' — use search_code/find_files instead of piping through grep/find, and prefer read_file/edit_file/apply_patch over cat/redirection for reading or changing files, since those work identically on every platform. Quote arguments the way the target shell expects (e.g. a git commit message must be one quoted argument to -m — an unquoted multi-word message gets split into extra pathspec arguments and fails). The command is killed if it doesn't finish within the timeout (default 1 minute) — pass a larger timeout_seconds for something you expect to be slow (a full build, a test suite, a decompile pass), up to 30 minutes; very large stdout/stderr is truncated (head and tail kept) rather than returned in full.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "command": { "type": "string" },
-                        "timeout_seconds": { "type": "integer", "description": "Max time to let the command run before it's killed. Defaults to 300, capped at 1800." }
+                        "timeout_seconds": { "type": "integer", "description": "Max time to let the command run before it's killed. Defaults to 60, capped at 1800." }
                     },
                     "required": ["command"]
                 }
@@ -943,6 +943,28 @@ pub fn execute(workspace: &str, name: &str, args: &Value) -> Result<String, Stri
 /// which is what lets run_shell_async actually kill a hung child instead
 /// of blocking the async runtime with no way to cancel it).
 #[cfg(target_os = "windows")]
+fn kill_process_tree(child: &mut tokio::process::Child) {
+    use std::os::windows::process::CommandExt;
+    if let Some(pid) = child.id() {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(0x0800_0000)
+            .output();
+    }
+    let _ = child.start_kill();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_process_tree(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGKILL);
+        }
+    }
+    let _ = child.start_kill();
+}
+
+#[cfg(target_os = "windows")]
 fn tokio_shell_command(command: &str) -> tokio::process::Command {
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let mut cmd = tokio::process::Command::new("powershell");
@@ -960,8 +982,10 @@ fn tokio_shell_command(command: &str) -> tokio::process::Command {
 
 #[cfg(not(target_os = "windows"))]
 fn tokio_shell_command(command: &str) -> tokio::process::Command {
+    use std::os::unix::process::CommandExt;
     let mut cmd = tokio::process::Command::new("sh");
     cmd.args(["-c", command]);
+    cmd.process_group(0);
     cmd
 }
 
@@ -1128,12 +1152,24 @@ pub async fn run_shell_async(
         Outcome::Finished => None,
     };
     if killed_for.is_some() {
-        let _ = child.start_kill();
+        kill_process_tree(&mut child);
         let _ = child.wait().await;
     }
 
-    let (stdout, stdout_total) = stdout_task.await.unwrap_or_default();
-    let (stderr, stderr_total) = stderr_task.await.unwrap_or_default();
+    let pipe_timeout = if killed_for.is_some() {
+        Duration::from_millis(500)
+    } else {
+        Duration::from_secs(5)
+    };
+
+    let (stdout, stdout_total) = match tokio::time::timeout(pipe_timeout, stdout_task).await {
+        Ok(Ok(res)) => res,
+        _ => (String::new(), 0),
+    };
+    let (stderr, stderr_total) = match tokio::time::timeout(pipe_timeout, stderr_task).await {
+        Ok(Ok(res)) => res,
+        _ => (String::new(), 0),
+    };
     let stdout = if stdout_total > stdout.len() {
         format!(
             "{}\n... [{} more characters omitted]",
@@ -1304,5 +1340,23 @@ mod tests {
         let res = execute(".", "get_app_version", &json!({})).unwrap();
         assert!(res.contains("Kestrel v"));
         assert!(res.contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[tokio::test]
+    async fn test_run_shell_async_timeout() {
+        let stop = Arc::new(SessionStop::new());
+        #[cfg(target_os = "windows")]
+        let cmd = "Start-Sleep -Seconds 10";
+        #[cfg(not(target_os = "windows"))]
+        let cmd = "sleep 10";
+
+        let start = Instant::now();
+        let res = run_shell_async(".", cmd, 1, false, false, stop).await;
+        let elapsed = start.elapsed();
+
+        assert!(res.is_ok());
+        let output = res.unwrap();
+        assert!(output.contains("timed out after 1s"));
+        assert!(elapsed.as_secs() < 5);
     }
 }

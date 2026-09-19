@@ -28,6 +28,7 @@ export interface Connection {
 }
 
 export interface SessionDefaults {
+  shell_timeout_seconds?: number;
   planning_enabled: boolean;
   subagents_enabled: boolean;
   graceful_stop: boolean;
